@@ -3,6 +3,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useState } from "react";
 import type { AnswerStatus, AskResponse } from "@/lib/api";
+import { answerAsText } from "@/lib/answerText";
 import { parseCitation, type Citation } from "@/lib/citations";
 import { plural } from "@/lib/labels";
 import { spring } from "@/lib/motion";
@@ -16,7 +17,15 @@ const STATUS: Record<AnswerStatus, { label: string; tone: string }> = {
   refused: { label: "Нет подтверждённого ответа", tone: "bg-surface-2 text-text-2" },
 };
 
-type Props = { answer: AskResponse; seconds: number; onCite: (c: Citation) => void };
+type Props = {
+  answer: AskResponse;
+  seconds: number;
+  onCite: (c: Citation) => void;
+  /** The question it answers, included when the answer is copied. */
+  question?: string;
+  /** Just arrived (not restored from history): words appear one by one. */
+  fresh: boolean;
+};
 
 // The whole answer appears in about this long however many words it has.
 const REVEAL_SECONDS = 2.5;
@@ -27,10 +36,10 @@ const CLAIM_PAUSE = 0.12;
 // words should not type themselves out a second time.
 const revealed = new WeakSet<AskResponse>();
 
-export function AnswerCard({ answer, seconds, onCite }: Props) {
+export function AnswerCard({ answer, seconds, onCite, question, fresh }: Props) {
   const status = STATUS[answer.status];
   const reduced = useReducedMotion();
-  const [firstTime] = useState(() => !revealed.has(answer));
+  const [firstTime] = useState(() => fresh && !revealed.has(answer));
   const animate = firstTime && !reduced;
   useEffect(() => {
     revealed.add(answer);
@@ -50,6 +59,7 @@ export function AnswerCard({ answer, seconds, onCite }: Props) {
       <div className="flex flex-wrap items-center gap-2">
         <span className={`t-caption rounded-full px-2.5 py-1 font-semibold ${status.tone}`}>{status.label}</span>
         <span className="t-caption text-text-3">{seconds.toFixed(0)} с</span>
+        <CopyButton text={() => answerAsText(answer, question)} />
       </div>
 
       {answer.claims.length === 0 ? (
@@ -172,5 +182,47 @@ function RemovedClaims({ claims }: { claims: string[] }) {
         )}
       </AnimatePresence>
     </section>
+  );
+}
+
+function CopyButton({ text }: { text: () => string }) {
+  const [state, setState] = useState<"idle" | "done" | "failed">("idle");
+  useEffect(() => {
+    if (state === "idle") return;
+    const t = setTimeout(() => setState("idle"), 2000);
+    return () => clearTimeout(t);
+  }, [state]);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text());
+      setState("done");
+    } catch {
+      setState("failed"); // no clipboard permission (e.g. an insecure context)
+    }
+  }
+
+  return (
+    <button
+      onClick={copy}
+      className="pressable t-caption ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium text-text-2 hover:bg-surface-2 hover:text-text"
+      title="Скопировать ответ со ссылками на статьи"
+      aria-label={state === "done" ? "Скопировано" : "Копировать ответ"}
+    >
+      {state === "done" ? (
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-green" aria-hidden>
+          <path d="M3 8.5l3.2 3.2L13 4.8" />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden>
+          <rect x="5.5" y="5.5" width="8" height="9" rx="1.5" />
+          <path d="M10.5 5.5v-2a1 1 0 00-1-1h-6a1 1 0 00-1 1v8a1 1 0 001 1h2" />
+        </svg>
+      )}
+      {/* On a phone only the icon fits next to the status. */}
+      <span className="hidden sm:inline" aria-live="polite">
+        {state === "done" ? "Скопировано" : state === "failed" ? "Не удалось" : "Копировать"}
+      </span>
+    </button>
   );
 }

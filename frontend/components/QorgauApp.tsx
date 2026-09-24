@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type AgentEvent, type AskResponse, type Clause, type DocumentResponse } from "@/lib/api";
 import type { Citation } from "@/lib/citations";
+import { clearChat, loadChat, saveChat } from "@/lib/history";
 import { spring, springSnappy } from "@/lib/motion";
 import type { Trace } from "./AgentSteps";
 import { AnswerCard } from "./AnswerCard";
@@ -14,12 +15,13 @@ import { DocumentCard } from "./DocumentCard";
 import { SearchCompare } from "./SearchCompare";
 import { Sheet } from "./Sheet";
 import { Thinking } from "./Thinking";
+import { WordRotate } from "./WordRotate";
 
 type Item =
   | { id: string; kind: "question"; text: string; withDocument: string | null }
   | { id: string; kind: "document"; doc: DocumentResponse }
   | { id: string; kind: "pending"; startedAt: number; withDocument: boolean; trace: Trace }
-  | { id: string; kind: "answer"; answer: AskResponse; seconds: number }
+  | { id: string; kind: "answer"; answer: AskResponse; seconds: number; fresh?: boolean }
   | { id: string; kind: "error"; message: string };
 
 type Tab = "assistant" | "search";
@@ -61,6 +63,18 @@ const EXAMPLES: { label: string; question: string; icon: React.ReactNode }[] = [
 
 const uid = () => crypto.randomUUID();
 
+// After a reload: an answer that was still being prepared cannot be picked up
+// again, and restored answers show at once instead of typing themselves out.
+function restoreItems(items: Item[]): Item[] {
+  return items.map((x) =>
+    x.kind === "pending"
+      ? { id: x.id, kind: "error", message: "Ответ не дождался: страница была обновлена. Задайте вопрос ещё раз." }
+      : x.kind === "answer"
+        ? { ...x, fresh: false }
+        : x,
+  );
+}
+
 function applyEvent(t: Trace, e: AgentEvent): Trace {
   if (e.type === "step") return { ...t, path: [...t.path, e.node], verified: e.node === "verify" ? [...t.verified, undefined] : t.verified };
   if (e.type === "tool") {
@@ -80,22 +94,68 @@ export function QorgauApp() {
   const [dragging, setDragging] = useState(false);
   const sessionId = useRef<string>("");
   const abort = useRef<AbortController | null>(null);
-  const bottom = useRef<HTMLDivElement>(null);
+  const restored = useRef(false);
+  const [away, setAway] = useState(false); // scrolled up from the latest message
   const reduced = useReducedMotion();
 
   const busy = items.some((i) => i.kind === "pending");
 
   useEffect(() => {
-    sessionId.current = `web-${uid()}`;
+    // sessionStorage exists only in the browser, so history is read after the
+    // first render (the server-rendered page is always the empty chat).
+    const saved = loadChat<Item>();
+    sessionId.current = saved?.sessionId ?? `web-${uid()}`;
+    if (saved?.items.length) {
+      setItems(restoreItems(saved.items));
+      setClauses(saved.clauses ?? []);
+    }
+    restored.current = true;
     api
       .health()
       .then((h) => setOnline(h.qdrant_connected && h.collection_exists))
       .catch(() => setOnline(false));
   }, []);
 
+  // To the very end of the page: main's bottom padding is what lifts the last
+  // message above the fixed composer bar, so scrolling to the thread's last
+  // element would leave it under the bar.
+  const scrollToEnd = useCallback(
+    () => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reduced ? "auto" : "smooth" }),
+    [reduced],
+  );
+
   useEffect(() => {
-    if (items.length) bottom.current?.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "end" });
-  }, [items, reduced]);
+    if (items.length) scrollToEnd();
+  }, [items, scrollToEnd]);
+
+  useEffect(() => {
+    if (!restored.current) return; // do not overwrite the history before it is read
+    if (items.length) saveChat({ sessionId: sessionId.current, items, clauses });
+    else clearChat();
+  }, [items, clauses]);
+
+  // "Back to the latest message" appears once the reader scrolls well up.
+  useEffect(() => {
+    const check = () => setAway(document.documentElement.scrollHeight - window.scrollY - window.innerHeight > 400);
+    check();
+    window.addEventListener("scroll", check, { passive: true });
+    window.addEventListener("resize", check);
+    return () => {
+      window.removeEventListener("scroll", check);
+      window.removeEventListener("resize", check);
+    };
+  }, [items]);
+
+  function newChat() {
+    abort.current?.abort();
+    setItems([]);
+    setClauses([]);
+    setAttachment(null);
+    setDraft("");
+    setCitation(null);
+    sessionId.current = `web-${uid()}`;
+    window.scrollTo({ top: 0 });
+  }
 
   const openCitation = useCallback((c: Citation) => setCitation(c), []);
   const closeCitation = useCallback(() => setCitation(null), []);
@@ -138,7 +198,7 @@ export function QorgauApp() {
         setItems((xs) => xs.map((x) => (x.id === pendingId && x.kind === "pending" ? { ...x, trace: applyEvent(x.trace, e) } : x)));
       const answer = await api.askStream(question, sessionId.current, docId, onEvent, controller.signal);
       const seconds = (Date.now() - startedAt) / 1000;
-      setItems((xs) => xs.map((x) => (x.id === pendingId ? { id: pendingId, kind: "answer", answer, seconds } : x)));
+      setItems((xs) => xs.map((x) => (x.id === pendingId ? { id: pendingId, kind: "answer", answer, seconds, fresh: true } : x)));
     } catch (e) {
       const message = controller.signal.aborted ? "Запрос отменён." : (e as Error).message;
       setItems((xs) => xs.map((x) => (x.id === pendingId ? { id: pendingId, kind: "error", message } : x)));
@@ -198,7 +258,7 @@ export function QorgauApp() {
           <div className="aurora" />
         </motion.div>
 
-        <Header tab={tab} onTab={setTab} online={online} />
+        <Header tab={tab} onTab={setTab} online={online} onNewChat={items.length > 0 ? newChat : undefined} />
 
         <main className={`mx-auto w-full max-w-3xl px-4 pt-8 sm:px-6 ${hero ? "pb-8" : "pb-60"}`}>
           {/* No initial={false} here: Motion passes it down to everything mounted
@@ -244,13 +304,14 @@ export function QorgauApp() {
                     <>
                       <div className="mt-8">{composer}</div>
                       <Suggestions onPick={(q) => send(q)} disabled={online === false} className="mt-4 justify-center" />
+                      <HowItWorks />
                       <Disclaimer />
                     </>
                   )}
                 </div>
                 {!hero && (
                   <div className="space-y-4" aria-live="polite">
-                    {items.map((item) => (
+                    {items.map((item, i) => (
                       <motion.div
                         key={item.id}
                         layout="position"
@@ -260,6 +321,7 @@ export function QorgauApp() {
                       >
                         <ThreadItem
                           item={item}
+                          question={questionBefore(items, i)}
                           onCite={openCitation}
                           onCancel={() => abort.current?.abort()}
                         />
@@ -267,7 +329,6 @@ export function QorgauApp() {
                     ))}
                   </div>
                 )}
-                <div ref={bottom} />
               </motion.div>
             ) : (
               <motion.div
@@ -285,6 +346,26 @@ export function QorgauApp() {
 
         {tab === "assistant" && !hero && (
           <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30">
+            <div className="absolute inset-x-0 -top-4 flex justify-center">
+              <AnimatePresence>
+                {away && (
+                  <motion.button
+                    onClick={scrollToEnd}
+                    initial={{ opacity: 0, y: 8, scale: 0.9 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.9 }}
+                    transition={springSnappy}
+                    className="material-thick pressable pointer-events-auto grid size-10 place-items-center rounded-full text-text-2 hover:text-text"
+                    aria-label="К последнему ответу"
+                    title="К последнему ответу"
+                  >
+                    <svg width="14" height="16" viewBox="0 0 14 16" fill="none" aria-hidden>
+                      <path d="M7 1.5V14M1.5 8.5L7 14l5.5-5.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </motion.button>
+                )}
+              </AnimatePresence>
+            </div>
             <div className="h-10 bg-gradient-to-t from-bg to-transparent" />
             <div className="pointer-events-auto bg-bg pb-[max(1rem,env(safe-area-inset-bottom))]">
               {/* Same box as <main>, so the composer lines up with the chat column. */}
@@ -326,7 +407,16 @@ export function QorgauApp() {
   );
 }
 
-function ThreadItem({ item, onCite, onCancel }: { item: Item; onCite: (c: Citation) => void; onCancel: () => void }) {
+function questionBefore(items: Item[], index: number): string | undefined {
+  for (let i = index - 1; i >= 0; i--) {
+    const x = items[i];
+    if (x.kind === "question") return x.text;
+  }
+}
+
+type ThreadItemProps = { item: Item; question?: string; onCite: (c: Citation) => void; onCancel: () => void };
+
+function ThreadItem({ item, question, onCite, onCancel }: ThreadItemProps) {
   switch (item.kind) {
     case "question":
       return (
@@ -344,7 +434,7 @@ function ThreadItem({ item, onCite, onCancel }: { item: Item; onCite: (c: Citati
         <Thinking startedAt={item.startedAt} withDocument={item.withDocument} trace={item.trace} onCite={onCite} onCancel={onCancel} />
       );
     case "answer":
-      return <AnswerCard answer={item.answer} seconds={item.seconds} onCite={onCite} />;
+      return <AnswerCard answer={item.answer} seconds={item.seconds} onCite={onCite} question={question} fresh={!!item.fresh} />;
     case "error":
       return (
         <div className="card t-body flex gap-3 p-5 text-text" role="alert">
@@ -357,30 +447,62 @@ function ThreadItem({ item, onCite, onCancel }: { item: Item; onCite: (c: Citati
   }
 }
 
+const TOPICS = [
+  "с ежегодным отпуском?",
+  "с испытательным сроком?",
+  "со сверхурочной работой?",
+  "с трудовым договором?",
+  "с вопросом по Конституции?",
+];
+
+const STEPS = [
+  { title: "Спросите своими словами", text: "Или загрузите трудовой договор — PDF или фото" },
+  { title: "Агент найдёт нормы", text: "В Трудовом кодексе и Конституции РК" },
+  { title: "Второй агент проверит", text: "Каждое утверждение — по тексту статьи" },
+];
+
+// The brand is already in the header, so the start screen does not repeat it:
+// it says what the assistant covers and asks what the user needs.
 function Intro() {
   return (
     <div className="flex flex-col items-center text-center">
-      <Logo size={64} />
-      <p className="t-eyebrow mt-5 text-gold-ink">Конституция · Трудовой кодекс РК</p>
-      <h1 className="t-display mt-2 max-w-xl text-balance">Трудовые права — со ссылкой на закон</h1>
+      <h1 className="t-display max-w-2xl">
+        Чем могу помочь
+        <br />
+        <WordRotate words={TOPICS} still="с трудовыми правами?" className="text-accent-ink" />
+      </h1>
       <p className="t-body mt-3 max-w-lg text-balance text-text-2">
-        Каждое утверждение проверяется вторым агентом и открывается до текста статьи.
+        Отвечаю по Конституции и Трудовому кодексу РК — со ссылкой на каждую статью.
       </p>
     </div>
   );
 }
 
-// What the intro becomes once the conversation starts: it stays at the top of
-// the thread and scrolls away with it.
+function HowItWorks() {
+  return (
+    <ol className="mt-8 grid gap-2 text-left sm:grid-cols-3" aria-label="Как это работает">
+      {STEPS.map((s, i) => (
+        <li key={s.title} className="flex gap-3 rounded-2xl border border-hairline bg-surface/60 p-3.5 backdrop-blur sm:flex-col sm:gap-2">
+          <span className="t-caption grid size-6 shrink-0 place-items-center rounded-full bg-accent-soft font-semibold text-accent-ink tabular-nums">
+            {i + 1}
+          </span>
+          <span>
+            <span className="t-caption block font-semibold text-text">{s.title}</span>
+            <span className="t-caption block text-text-2">{s.text}</span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+// What the intro becomes once the conversation starts: a quiet line at the
+// top of the thread (no second logo), scrolling away with it.
 function IntroCompact() {
   return (
-    <div className="mb-6 flex items-center gap-3 border-b border-hairline pb-5">
-      <Logo size={40} />
-      <div className="min-w-0">
-        <p className="t-eyebrow text-gold-ink">Конституция · Трудовой кодекс РК</p>
-        <h1 className="t-title mt-0.5">Трудовые права — со ссылкой на закон</h1>
-      </div>
-    </div>
+    <p className="t-caption mb-6 border-b border-hairline pb-4 text-text-3">
+      Отвечаю по Конституции и Трудовому кодексу РК. Каждое утверждение проверяет второй агент.
+    </p>
   );
 }
 
@@ -443,7 +565,9 @@ function PillIcon({ className, children }: { className: string; children: React.
   );
 }
 
-function Header({ tab, onTab, online }: { tab: Tab; onTab: (t: Tab) => void; online: boolean | null }) {
+type HeaderProps = { tab: Tab; onTab: (t: Tab) => void; online: boolean | null; onNewChat?: () => void };
+
+function Header({ tab, onTab, online, onNewChat }: HeaderProps) {
   const tabs: { id: Tab; label: string }[] = [
     { id: "assistant", label: "Помощник" },
     { id: "search", label: "Поиск A/B" },
@@ -453,7 +577,9 @@ function Header({ tab, onTab, online }: { tab: Tab; onTab: (t: Tab) => void; onl
       <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4 sm:px-6">
         <div className="flex items-center gap-2">
           <Logo size={30} />
-          <span className="text-[1.0625rem] font-semibold tracking-[-0.01em]">
+          {/* On the narrowest phones the emblem alone leaves room for the tabs
+              and the new-chat button; the name is still the page title. */}
+          <span className="hidden text-[1.0625rem] font-semibold tracking-[-0.01em] min-[420px]:inline">
             Qorgau<span className="text-gold-ink">AI</span>
           </span>
         </div>
@@ -463,7 +589,7 @@ function Header({ tab, onTab, online }: { tab: Tab; onTab: (t: Tab) => void; onl
               key={t.id}
               onClick={() => onTab(t.id)}
               aria-current={tab === t.id ? "page" : undefined}
-              className="pressable t-caption relative rounded-full px-3.5 py-1.5 font-medium"
+              className="pressable t-caption relative rounded-full px-3 py-1.5 font-medium whitespace-nowrap sm:px-3.5"
             >
               {tab === t.id && (
                 <motion.span
@@ -476,6 +602,28 @@ function Header({ tab, onTab, online }: { tab: Tab; onTab: (t: Tab) => void; onl
             </button>
           ))}
         </nav>
+        <AnimatePresence initial={false}>
+          {onNewChat && (
+            <motion.button
+              onClick={() => {
+                onTab("assistant");
+                onNewChat();
+              }}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={springSnappy}
+              className="pressable t-caption inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1.5 font-medium text-text hover:bg-accent-soft hover:text-accent-ink"
+              aria-label="Новый чат"
+              title="Начать новый чат"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
+                <path d="M6 1.5v9M1.5 6h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+              <span className="hidden sm:inline">Новый чат</span>
+            </motion.button>
+          )}
+        </AnimatePresence>
         <span className="t-caption hidden items-center gap-1.5 text-text-2 sm:flex" title="Состояние бэкенда и Qdrant">
           <span
             className={`size-2 rounded-full ${online === null ? "bg-text-3" : online ? "bg-green" : "bg-red"}`}
