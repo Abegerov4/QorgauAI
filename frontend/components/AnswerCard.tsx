@@ -1,13 +1,14 @@
 "use client";
 
-import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useEffect, useState } from "react";
 import type { AnswerStatus, AskResponse } from "@/lib/api";
 import { parseCitation, type Citation } from "@/lib/citations";
 import { plural } from "@/lib/labels";
 import { spring } from "@/lib/motion";
 import { AgentSteps, traceFromAnswer } from "./AgentSteps";
 import { CitationChip } from "./CitationChip";
+import { countWords, GenerateText } from "./GenerateText";
 
 const STATUS: Record<AnswerStatus, { label: string; tone: string }> = {
   answered: { label: "Подтверждено нормами", tone: "bg-green-soft text-green" },
@@ -17,9 +18,32 @@ const STATUS: Record<AnswerStatus, { label: string; tone: string }> = {
 
 type Props = { answer: AskResponse; seconds: number; onCite: (c: Citation) => void };
 
+// The whole answer appears in about this long however many words it has.
+const REVEAL_SECONDS = 2.5;
+const MAX_WORD_STEP = 0.035;
+const CLAIM_PAUSE = 0.12;
+
+// Answers already revealed once: switching tabs remounts the card, and the
+// words should not type themselves out a second time.
+const revealed = new WeakSet<AskResponse>();
+
 export function AnswerCard({ answer, seconds, onCite }: Props) {
   const status = STATUS[answer.status];
-  const [first, ...rest] = answer.claims;
+  const reduced = useReducedMotion();
+  const [firstTime] = useState(() => !revealed.has(answer));
+  const animate = firstTime && !reduced;
+  useEffect(() => {
+    revealed.add(answer);
+  }, [answer]);
+
+  // Claims appear one after another: each starts when the previous is written.
+  const texts = answer.claims.length ? answer.claims.map((c) => c.text) : [answer.answer];
+  const counts = texts.map(countWords);
+  const step = Math.min(MAX_WORD_STEP, REVEAL_SECONDS / Math.max(1, counts.reduce((a, b) => a + b, 0)));
+  const starts = counts.map((_, i) => counts.slice(0, i).reduce((a, n) => a + n * step + CLAIM_PAUSE, 0));
+  const done = starts[starts.length - 1] + counts[counts.length - 1] * step;
+  const after = (delay: number) =>
+    animate ? { initial: { opacity: 0 }, animate: { opacity: 1 }, transition: { delay, duration: 0.3 } } : {};
 
   return (
     <article className="card p-5 sm:p-6">
@@ -29,52 +53,77 @@ export function AnswerCard({ answer, seconds, onCite }: Props) {
       </div>
 
       {answer.claims.length === 0 ? (
-        <p className="t-body mt-4">{answer.answer}</p>
+        <p className="t-body mt-4">
+          <GenerateText text={answer.answer} start={0} step={step} animate={animate} />
+        </p>
       ) : (
         <div className="mt-4 space-y-3.5">
-          <Claim text={first.text} sources={first.sources} onCite={onCite} lead />
-          {rest.map((c, i) => (
-            <Claim key={i} text={c.text} sources={c.sources} onCite={onCite} />
+          {answer.claims.map((c, i) => (
+            <Claim
+              key={i}
+              text={c.text}
+              sources={c.sources}
+              onCite={onCite}
+              lead={i === 0}
+              reveal={animate ? { start: starts[i], step } : null}
+            />
           ))}
         </div>
       )}
 
-      {answer.recommend_lawyer && (
-        <div className="t-caption mt-5 flex gap-2.5 rounded-2xl bg-gold-soft p-3.5 text-text">
-          <span aria-hidden className="text-gold-ink">●</span>
-          <span>Ситуация спорная или с высокой ценой ошибки — стоит показать её практикующему юристу.</span>
+      <motion.div {...after(done)}>
+        {answer.recommend_lawyer && (
+          <div className="t-caption mt-5 flex gap-2.5 rounded-2xl bg-gold-soft p-3.5 text-text">
+            <span aria-hidden className="text-gold-ink">●</span>
+            <span>Ситуация спорная или с высокой ценой ошибки — стоит показать её практикующему юристу.</span>
+          </div>
+        )}
+
+        {answer.missing_info.length > 0 && (
+          <section className="mt-5">
+            <h3 className="t-eyebrow text-text-3">Что осталось за рамками ответа</h3>
+            <ul className="t-body mt-2 space-y-1 text-text-2">
+              {answer.missing_info.map((m, i) => (
+                <li key={i} className="flex gap-2">
+                  <span aria-hidden>–</span>
+                  <span>{m}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {answer.removed_claims.length > 0 && <RemovedClaims claims={answer.removed_claims} />}
+
+        <div className="mt-5">
+          <AgentSteps trace={traceFromAnswer(answer)} onCite={onCite} />
+          <p className="t-caption mt-3 text-text-3">{answer.disclaimer}</p>
         </div>
-      )}
-
-      {answer.missing_info.length > 0 && (
-        <section className="mt-5">
-          <h3 className="t-eyebrow text-text-3">Что осталось за рамками ответа</h3>
-          <ul className="t-body mt-2 space-y-1 text-text-2">
-            {answer.missing_info.map((m, i) => (
-              <li key={i} className="flex gap-2">
-                <span aria-hidden>–</span>
-                <span>{m}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {answer.removed_claims.length > 0 && <RemovedClaims claims={answer.removed_claims} />}
-
-      <div className="mt-5">
-        <AgentSteps trace={traceFromAnswer(answer)} onCite={onCite} />
-        <p className="t-caption mt-3 text-text-3">{answer.disclaimer}</p>
-      </div>
+      </motion.div>
     </article>
   );
 }
 
-function Claim({ text, sources, onCite, lead }: { text: string; sources: string[]; onCite: (c: Citation) => void; lead?: boolean }) {
+type ClaimProps = {
+  text: string;
+  sources: string[];
+  onCite: (c: Citation) => void;
+  lead?: boolean;
+  /** Word-by-word appearance; null shows the claim at once. */
+  reveal: { start: number; step: number } | null;
+};
+
+function Claim({ text, sources, onCite, lead, reveal }: ClaimProps) {
+  const chipsAt = reveal ? reveal.start + countWords(text) * reveal.step : 0;
   return (
     <div>
-      <p className={lead ? "text-[1.1875rem] leading-[1.45] font-medium tracking-[-0.01em]" : "t-body"}>{text}</p>
-      <div className="mt-2 flex flex-wrap gap-1.5">
+      <p className={lead ? "text-[1.1875rem] leading-[1.45] font-medium tracking-[-0.01em]" : "t-body"}>
+        <GenerateText text={text} start={reveal?.start ?? 0} step={reveal?.step ?? 0} animate={!!reveal} />
+      </p>
+      <motion.div
+        className="mt-2 flex flex-wrap gap-1.5"
+        {...(reveal ? { initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 }, transition: { ...spring, delay: chipsAt } } : {})}
+      >
         {sources.map((raw) => (
           <CitationChip
             key={raw}
@@ -85,7 +134,7 @@ function Claim({ text, sources, onCite, lead }: { text: string; sources: string[
             }`}
           />
         ))}
-      </div>
+      </motion.div>
     </div>
   );
 }

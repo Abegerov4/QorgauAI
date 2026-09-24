@@ -246,3 +246,59 @@ body {
     background-position: -150% 0;
   }
 }
+
+/* --------------------------------------------------------------- aurora */
+
+/* Soft drifting light behind the empty chat (after Aceternity's Aurora
+   Background on 21st.dev): brand-colored bands, cut by stripes of the page
+   color and blurred, slide slowly sideways. Only the start screen shows it;
+   under reduced motion it holds still. */
+.aurora {
+  --aurora-stripes: repeating-linear-gradient(100deg, var(--bg) 0%, var(--bg) 7%, transparent 10%, transparent 12%, var(--bg) 16%);
+  --aurora-colors: repeating-linear-gradient(100deg, #2c67aa 10%, #8fbcec 15%, #0d4c8c 20%, #f0b430 25%, #6fb3ff 30%);
+  position: absolute;
+  inset: -10px;
+  background-image: var(--aurora-stripes), var(--aurora-colors);
+  background-size: 300%, 200%;
+  background-position: 50% 50%, 50% 50%;
+  filter: blur(10px);
+  opacity: 0.55;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 20%, transparent 75%);
+  will-change: transform;
+}
+.aurora::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--aurora-stripes), var(--aurora-colors);
+  background-size: 200%, 100%;
+  background-attachment: fixed;
+  animation: aurora 60s linear infinite;
+  mix-blend-mode: soft-light;
+}
+@media (prefers-color-scheme: dark) {
+  .aurora {
+    opacity: 0.4;
+  }
+}
+@keyframes aurora {
+  from {
+    background-position: 50% 50%, 50% 50%;
+  }
+  to {
+    background-position: 350% 50%, 350% 50%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aurora::after {
+    animation: none;
+  }
+}
+
+/* Horizontal chip rows scroll by touch or trackpad without a visible bar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

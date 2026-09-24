@@ -185,10 +185,26 @@ export function QorgauApp() {
         onDragLeave={(e) => e.currentTarget === e.target && setDragging(false)}
         onDrop={onDrop}
       >
+        {/* Shared by both tabs, so switching tabs never blinks it out. Full on
+            the start screen, quieter behind content so it never competes with
+            an answer or the search results. */}
+        <motion.div
+          className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: tab === "search" ? 0.6 : hero ? 1 : 0.35 }}
+          transition={{ duration: 0.6 }}
+          aria-hidden
+        >
+          <div className="aurora" />
+        </motion.div>
+
         <Header tab={tab} onTab={setTab} online={online} />
 
-        <main className={`mx-auto w-full max-w-3xl px-4 pt-8 sm:px-6 ${hero ? "pb-8" : "pb-48"}`}>
-          <AnimatePresence mode="wait" initial={false}>
+        <main className={`mx-auto w-full max-w-3xl px-4 pt-8 sm:px-6 ${hero ? "pb-8" : "pb-60"}`}>
+          {/* No initial={false} here: Motion passes it down to everything mounted
+              inside later, which would skip the entrance of new messages and the
+              word-by-word answer. */}
+          <AnimatePresence mode="wait">
             {tab === "assistant" ? (
               <motion.div
                 key="assistant"
@@ -197,11 +213,42 @@ export function QorgauApp() {
                 exit={{ opacity: 0 }}
                 transition={springSnappy}
               >
-                {items.length === 0 ? (
-                  <Empty onPick={(q) => send(q)} disabled={online === false}>
-                    {composer}
-                  </Empty>
-                ) : (
+                {/* One continuous screen: with the first question the intro
+                    shrinks into a compact heading and the thread grows under it,
+                    instead of the start screen being swapped for another. */}
+                <div className={hero ? "flex min-h-[calc(100dvh-7.5rem)] flex-col justify-center" : ""}>
+                  <div className="relative">
+                    <AnimatePresence mode="popLayout" initial={false}>
+                      {hero ? (
+                        <motion.div
+                          key="intro"
+                          exit={{ opacity: 0, y: -48, scale: 0.96 }}
+                          transition={spring}
+                          className="w-full"
+                        >
+                          <Intro />
+                        </motion.div>
+                      ) : (
+                        <motion.div
+                          key="intro-compact"
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ ...spring, delay: 0.08 }}
+                        >
+                          <IntroCompact />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  {hero && (
+                    <>
+                      <div className="mt-8">{composer}</div>
+                      <Suggestions onPick={(q) => send(q)} disabled={online === false} className="mt-4 justify-center" />
+                      <Disclaimer />
+                    </>
+                  )}
+                </div>
+                {!hero && (
                   <div className="space-y-4" aria-live="polite">
                     {items.map((item) => (
                       <motion.div
@@ -242,6 +289,14 @@ export function QorgauApp() {
             <div className="pointer-events-auto bg-bg pb-[max(1rem,env(safe-area-inset-bottom))]">
               {/* Same box as <main>, so the composer lines up with the chat column. */}
               <div className="mx-auto max-w-3xl px-4 sm:px-6">
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ ...spring, delay: 0.2 }}>
+                  <Suggestions
+                    onPick={(q) => send(q)}
+                    disabled={online === false || busy}
+                    compact
+                    className="mb-2"
+                  />
+                </motion.div>
                 {composer}
                 <Disclaimer />
               </div>
@@ -302,38 +357,61 @@ function ThreadItem({ item, onCite, onCancel }: { item: Item; onCite: (c: Citati
   }
 }
 
-function Empty({
-  onPick,
-  disabled,
-  children,
-}: {
-  onPick: (q: string) => void;
-  disabled: boolean;
-  children: React.ReactNode;
-}) {
-  const pill =
-    "pressable t-caption inline-flex items-center gap-1.5 rounded-full border border-hairline bg-surface px-3 py-2 font-medium text-text-2 hover:bg-surface-2 hover:text-text disabled:opacity-50";
+function Intro() {
   return (
-    // Header 3.5rem + main's top and bottom padding 2 × 2rem.
-    <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col items-center justify-center text-center">
+    <div className="flex flex-col items-center text-center">
       <Logo size={64} />
       <p className="t-eyebrow mt-5 text-gold-ink">Конституция · Трудовой кодекс РК</p>
       <h1 className="t-display mt-2 max-w-xl text-balance">Трудовые права — со ссылкой на закон</h1>
       <p className="t-body mt-3 max-w-lg text-balance text-text-2">
         Каждое утверждение проверяется вторым агентом и открывается до текста статьи.
       </p>
+    </div>
+  );
+}
 
-      <div className="mt-8 w-full text-left">{children}</div>
-
-      <div className="mt-4 flex flex-wrap justify-center gap-1.5">
-        {EXAMPLES.map((e) => (
-          <button key={e.label} onClick={() => onPick(e.question)} disabled={disabled} title={e.question} className={pill}>
-            <PillIcon className="text-accent-ink">{e.icon}</PillIcon>
-            {e.label}
-          </button>
-        ))}
+// What the intro becomes once the conversation starts: it stays at the top of
+// the thread and scrolls away with it.
+function IntroCompact() {
+  return (
+    <div className="mb-6 flex items-center gap-3 border-b border-hairline pb-5">
+      <Logo size={40} />
+      <div className="min-w-0">
+        <p className="t-eyebrow text-gold-ink">Конституция · Трудовой кодекс РК</p>
+        <h1 className="t-title mt-0.5">Трудовые права — со ссылкой на закон</h1>
       </div>
-      <Disclaimer />
+    </div>
+  );
+}
+
+function Suggestions({
+  onPick,
+  disabled,
+  compact = false,
+  className,
+}: {
+  onPick: (q: string) => void;
+  disabled: boolean;
+  compact?: boolean;
+  className: string;
+}) {
+  // Above the bottom composer the chips stay on one line and scroll sideways.
+  const size = compact ? "px-2.5 py-1.5" : "px-3 py-2";
+  const row = compact ? "no-scrollbar flex-nowrap overflow-x-auto" : "flex-wrap";
+  return (
+    <div className={`flex gap-1.5 ${row} ${className}`}>
+      {EXAMPLES.map((e) => (
+        <button
+          key={e.label}
+          onClick={() => onPick(e.question)}
+          disabled={disabled}
+          title={e.question}
+          className={`pressable t-caption inline-flex shrink-0 items-center gap-1.5 rounded-full border border-hairline bg-surface font-medium text-text-2 hover:bg-surface-2 hover:text-text disabled:opacity-50 ${size}`}
+        >
+          <PillIcon className="text-accent-ink">{e.icon}</PillIcon>
+          {e.label}
+        </button>
+      ))}
     </div>
   );
 }
