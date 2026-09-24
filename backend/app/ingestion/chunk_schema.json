@@ -11,7 +11,7 @@
     "article_number": { "type": "string", "pattern": "^\\d+(-\\d+)?$" },
     "chunk_index": { "type": "integer", "minimum": 0 },
     "point": { "type": "string" },
-    "chunk_type": { "type": "string", "enum": ["norm", "article_full", "preamble", "other"] },
+    "chunk_type": { "type": "string", "enum": ["norm", "article_full", "repealed", "fragment", "preamble", "other"] },
     "source": { "type": "string", "minLength": 1 }
   },
   "additionalProperties": false

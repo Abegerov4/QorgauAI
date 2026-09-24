@@ -9,7 +9,7 @@ import { spring } from "@/lib/motion";
 
 const STATUS: Record<AnswerStatus, { label: string; tone: string }> = {
   answered: { label: "Подтверждено нормами", tone: "bg-green-soft text-green" },
-  partial: { label: "Подтверждено частично", tone: "bg-orange-soft text-orange" },
+  partial: { label: "Подтверждено частично", tone: "bg-gold-soft text-gold-ink" },
   refused: { label: "Нет подтверждённого ответа", tone: "bg-surface-2 text-text-2" },
 };
 
@@ -38,8 +38,8 @@ export function AnswerCard({ answer, seconds, onCite }: Props) {
       )}
 
       {answer.recommend_lawyer && (
-        <div className="t-caption mt-5 flex gap-2.5 rounded-2xl bg-orange-soft p-3.5 text-text">
-          <span aria-hidden className="text-orange">●</span>
+        <div className="t-caption mt-5 flex gap-2.5 rounded-2xl bg-gold-soft p-3.5 text-text">
+          <span aria-hidden className="text-gold-ink">●</span>
           <span>Ситуация спорная или с высокой ценой ошибки — стоит показать её практикующему юристу.</span>
         </div>
       )}
@@ -81,7 +81,7 @@ function Claim({ text, sources, onCite, lead }: { text: string; sources: string[
               onClick={() => onCite(c)}
               title={raw}
               className={`pressable t-caption rounded-full px-2.5 py-1 font-medium ${
-                c.kind === "doc" ? "bg-surface-2 text-text" : "bg-accent-soft text-accent"
+                c.kind === "doc" ? "bg-surface-2 text-text" : "bg-accent-soft text-accent-ink"
               }`}
             >
               {citationLabel(c)}
@@ -135,7 +135,7 @@ function Path({ path }: { path: string[] }) {
       {path.map((node, i) => (
         <li key={i} className="flex items-center gap-1.5">
           {i > 0 && <span aria-hidden>›</span>}
-          <span className={node === "rewrite_query" ? "text-orange" : ""}>{NODE_LABELS[node] ?? node}</span>
+          <span className={node === "rewrite_query" ? "text-gold-ink" : ""}>{NODE_LABELS[node] ?? node}</span>
         </li>
       ))}
     </ol>

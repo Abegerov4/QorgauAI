@@ -205,13 +205,13 @@ export function QorgauApp() {
         <AnimatePresence>
           {dragging && (
             <motion.div
-              className="pointer-events-none fixed inset-3 z-40 grid place-items-center rounded-[2rem] border-2 border-dashed border-accent bg-accent-soft"
+              className="pointer-events-none fixed inset-3 z-40 grid place-items-center rounded-[2rem] border-2 border-dashed border-accent-ink bg-accent-soft"
               initial={{ opacity: 0, scale: 0.98 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.98 }}
               transition={springSnappy}
             >
-              <p className="t-title text-accent">Отпустите, чтобы загрузить договор</p>
+              <p className="t-title text-accent-ink">Отпустите, чтобы загрузить договор</p>
             </motion.div>
           )}
         </AnimatePresence>
@@ -257,7 +257,8 @@ function Empty({ onPick, disabled }: { onPick: (q: string) => void; disabled: bo
   return (
     <div className="pt-6 sm:pt-12">
       <Logo size={72} />
-      <h1 className="t-display mt-6 max-w-xl">Трудовые права — со ссылкой на закон</h1>
+      <p className="t-eyebrow mt-6 text-gold-ink">Конституция · Трудовой кодекс РК</p>
+      <h1 className="t-display mt-2 max-w-xl">Трудовые права — со ссылкой на закон</h1>
       <p className="t-body mt-3 max-w-xl text-text-2">
         QorgauAI отвечает по Конституции (ред. 2026) и Трудовому кодексу Республики Казахстан. Каждое утверждение
         проверяется вторым агентом и открывается до текста статьи. Можно загрузить трудовой договор — PDF или фото.
@@ -288,7 +289,9 @@ function Header({ tab, onTab, online }: { tab: Tab; onTab: (t: Tab) => void; onl
       <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4 sm:px-6">
         <div className="flex items-center gap-2">
           <Logo size={30} />
-          <span className="text-[1.0625rem] font-semibold tracking-[-0.01em]">QorgauAI</span>
+          <span className="text-[1.0625rem] font-semibold tracking-[-0.01em]">
+            Qorgau<span className="text-gold-ink">AI</span>
+          </span>
         </div>
         <nav className="mx-auto flex rounded-full bg-surface-2 p-0.5" aria-label="Разделы">
           {tabs.map((t) => (

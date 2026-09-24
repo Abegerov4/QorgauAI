@@ -1,0 +1,420 @@
+{
+  "dense": {
+    "questions": 27,
+    "recall_at_5": 0.815,
+    "mrr": 0.846,
+    "noise_at_5": 0.007,
+    "keyword_noise_at_5": 0.183,
+    "misses": [
+      {
+        "id": "q04",
+        "expected": [
+          [
+            "labor_code",
+            "97"
+          ]
+        ],
+        "found": [
+          [
+            "labor_code",
+            "100"
+          ],
+          [
+            "labor_code",
+            "99"
+          ],
+          [
+            "labor_code",
+            "100"
+          ],
+          [
+            "labor_code",
+            "133"
+          ],
+          [
+            "labor_code",
+            "87"
+          ]
+        ]
+      },
+      {
+        "id": "q14",
+        "expected": [
+          [
+            "labor_code",
+            "88"
+          ]
+        ],
+        "found": [
+          [
+            "labor_code",
+            "99"
+          ],
+          [
+            "labor_code",
+            "87"
+          ],
+          [
+            "labor_code",
+            "100"
+          ],
+          [
+            "constitution",
+            "27"
+          ],
+          [
+            "labor_code",
+            "97"
+          ]
+        ]
+      },
+      {
+        "id": "q21",
+        "expected": [
+          [
+            "labor_code",
+            "88"
+          ],
+          [
+            "labor_code",
+            "89"
+          ]
+        ],
+        "found": [
+          [
+            "labor_code",
+            "89"
+          ],
+          [
+            "labor_code",
+            "69"
+          ],
+          [
+            "labor_code",
+            "133"
+          ],
+          [
+            "labor_code",
+            "52"
+          ],
+          [
+            "labor_code",
+            "87"
+          ]
+        ]
+      },
+      {
+        "id": "q22",
+        "expected": [
+          [
+            "labor_code",
+            "88"
+          ],
+          [
+            "labor_code",
+            "89"
+          ]
+        ],
+        "found": [
+          [
+            "labor_code",
+            "89"
+          ],
+          [
+            "labor_code",
+            "87"
+          ],
+          [
+            "constitution",
+            "27"
+          ],
+          [
+            "labor_code",
+            "87"
+          ],
+          [
+            "labor_code",
+            "87"
+          ]
+        ]
+      },
+      {
+        "id": "q23",
+        "expected": [
+          [
+            "labor_code",
+            "88"
+          ],
+          [
+            "labor_code",
+            "89"
+          ]
+        ],
+        "found": [
+          [
+            "labor_code",
+            "89"
+          ],
+          [
+            "labor_code",
+            "89"
+          ],
+          [
+            "labor_code",
+            "87"
+          ],
+          [
+            "labor_code",
+            "69"
+          ],
+          [
+            "labor_code",
+            "87"
+          ]
+        ]
+      },
+      {
+        "id": "q24",
+        "expected": [
+          [
+            "labor_code",
+            "88"
+          ],
+          [
+            "labor_code",
+            "89"
+          ]
+        ],
+        "found": [
+          [
+            "labor_code",
+            "89"
+          ],
+          [
+            "labor_code",
+            "87"
+          ],
+          [
+            "labor_code",
+            "90"
+          ],
+          [
+            "labor_code",
+            "90"
+          ],
+          [
+            "labor_code",
+            "89"
+          ]
+        ]
+      },
+      {
+        "id": "q25",
+        "expected": [
+          [
+            "labor_code",
+            "88"
+          ]
+        ],
+        "found": [
+          [
+            "labor_code",
+            "89"
+          ],
+          [
+            "constitution",
+            "27"
+          ],
+          [
+            "labor_code",
+            "139"
+          ],
+          [
+            "labor_code",
+            "1"
+          ],
+          [
+            "labor_code",
+            "87"
+          ]
+        ]
+      }
+    ]
+  },
+  "hybrid": {
+    "questions": 27,
+    "recall_at_5": 0.87,
+    "mrr": 0.852,
+    "noise_at_5": 0.007,
+    "keyword_noise_at_5": 0.15,
+    "misses": [
+      {
+        "id": "q14",
+        "expected": [
+          [
+            "labor_code",
+            "88"
+          ]
+        ],
+        "found": [
+          [
+            "labor_code",
+            "30"
+          ],
+          [
+            "labor_code",
+            "99"
+          ],
+          [
+            "labor_code",
+            "87"
+          ],
+          [
+            "labor_code",
+            "133"
+          ],
+          [
+            "labor_code",
+            "100"
+          ]
+        ]
+      },
+      {
+        "id": "q21",
+        "expected": [
+          [
+            "labor_code",
+            "88"
+          ],
+          [
+            "labor_code",
+            "89"
+          ]
+        ],
+        "found": [
+          [
+            "labor_code",
+            "89"
+          ],
+          [
+            "labor_code",
+            "69"
+          ],
+          [
+            "labor_code",
+            "75"
+          ],
+          [
+            "labor_code",
+            "87"
+          ],
+          [
+            "labor_code",
+            "89"
+          ]
+        ]
+      },
+      {
+        "id": "q22",
+        "expected": [
+          [
+            "labor_code",
+            "88"
+          ],
+          [
+            "labor_code",
+            "89"
+          ]
+        ],
+        "found": [
+          [
+            "labor_code",
+            "89"
+          ],
+          [
+            "labor_code",
+            "16"
+          ],
+          [
+            "labor_code",
+            "87"
+          ],
+          [
+            "labor_code",
+            "92"
+          ],
+          [
+            "constitution",
+            "27"
+          ]
+        ]
+      },
+      {
+        "id": "q23",
+        "expected": [
+          [
+            "labor_code",
+            "88"
+          ],
+          [
+            "labor_code",
+            "89"
+          ]
+        ],
+        "found": [
+          [
+            "labor_code",
+            "89"
+          ],
+          [
+            "labor_code",
+            "89"
+          ],
+          [
+            "labor_code",
+            "95"
+          ],
+          [
+            "labor_code",
+            "87"
+          ],
+          [
+            "labor_code",
+            "87"
+          ]
+        ]
+      },
+      {
+        "id": "q25",
+        "expected": [
+          [
+            "labor_code",
+            "88"
+          ]
+        ],
+        "found": [
+          [
+            "labor_code",
+            "89"
+          ],
+          [
+            "labor_code",
+            "68"
+          ],
+          [
+            "constitution",
+            "27"
+          ],
+          [
+            "labor_code",
+            "99"
+          ],
+          [
+            "labor_code",
+            "91"
+          ]
+        ]
+      }
+    ]
+  }
+}

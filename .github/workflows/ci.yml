@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Backend tests + retrieval eval
+    runs-on: ubuntu-latest
+    services:
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+    env:
+      # Query and corpus embeddings only -- no chat-model calls run in CI.
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      LANGFUSE_PUBLIC_KEY: ""
+      LANGFUSE_SECRET_KEY: ""
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies (CPU-only torch)
+        run: pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: Check OpenAI key
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "::error::Add the OPENAI_API_KEY repository secret (Settings -> Secrets and variables -> Actions)."
+            exit 1
+          fi
+
+      # Corpus embeddings are cached by chunk content: only the first run (or
+      # a changed corpus) pays for embedding ~2100 chunks (~$0.03).
+      - uses: actions/cache@v4
+        with:
+          path: backend/data/cache
+          key: dense-${{ hashFiles('backend/data/processed/*.jsonl') }}
+          restore-keys: dense-
+
+      - name: Index corpus into Qdrant
+        run: python -m app.retrieval.index_corpus --recreate
+
+      # The reranker test downloads a 2 GB cross-encoder; it runs locally only.
+      - name: Tests
+        run: python -m pytest -q --ignore=tests/test_rerank.py
+
+      - name: Retrieval eval (gate on hybrid Recall@5)
+        run: python -m app.eval.retrieval --min-recall 0.85 --out retrieval.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: retrieval-eval
+          path: backend/retrieval.json
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend lint + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      # next build also type-checks (route types are generated during the build).
+      - run: npm run build

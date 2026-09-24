@@ -2,52 +2,61 @@
 
 /* ---------------------------------------------------------------- tokens */
 
+/* Brand palette from the logo: deep navy (#002a50) carries structure and
+   actions, gold (#c8901c / #f0b430) is the accent used sparingly - the
+   wordmark, the cited point in a norm, "partial" states. Neutrals are
+   tinted a touch towards the navy so the page reads as one material.
+   Colour always sits on a solid layer; translucent chrome stays neutral. */
 :root {
-  --bg: #f5f5f7;
+  --bg: #f4f6f9;
   --surface: #ffffff;
-  --surface-2: #f0f0f3;
-  --text: #1d1d1f;
-  --text-2: #6e6e73;
-  --text-3: #86868b;
-  --hairline: rgba(0, 0, 0, 0.08);
-  --accent: #0071e3;
-  --accent-soft: rgba(0, 113, 227, 0.1);
-  --green: #1f8a3b;
+  --surface-2: #eceff4;
+  --text: #0d1a2b;
+  --text-2: #56627a;
+  --text-3: #7d879a;
+  --hairline: rgba(13, 26, 43, 0.09);
+  --accent: #0e3a6a; /* fills: buttons, the user's bubble */
+  --accent-ink: #0d4c8c; /* text and icons on neutral surfaces */
+  --accent-soft: rgba(13, 76, 140, 0.09);
+  --gold: #c8901c;
+  --gold-ink: #8a5b00;
+  --gold-soft: rgba(240, 180, 48, 0.2);
+  --green: #1a7f3c;
   --green-soft: rgba(52, 199, 89, 0.14);
-  --orange: #b25000;
-  --orange-soft: rgba(255, 149, 0, 0.15);
-  --red: #c9302c;
-  --red-soft: rgba(255, 59, 48, 0.12);
-  --material: rgba(255, 255, 255, 0.72);
-  --material-edge: rgba(255, 255, 255, 0.6);
-  --scrim: rgba(0, 0, 0, 0.28);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.04);
-  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.06);
+  --red: #c42b26;
+  --red-soft: rgba(255, 59, 48, 0.1);
+  --material: rgba(250, 251, 253, 0.74);
+  --material-edge: rgba(255, 255, 255, 0.7);
+  --scrim: rgba(4, 16, 34, 0.32);
+  --shadow-sm: 0 1px 2px rgba(13, 26, 43, 0.05), 0 2px 8px rgba(13, 26, 43, 0.05);
+  --shadow-lg: 0 8px 40px rgba(13, 26, 43, 0.16), 0 2px 8px rgba(13, 26, 43, 0.07);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #000000;
-    --surface: #1c1c1e;
-    --surface-2: #2c2c2e;
-    --text: #f5f5f7;
-    --text-2: #a1a1a6;
-    --text-3: #8e8e93;
-    --hairline: rgba(255, 255, 255, 0.1);
-    --accent: #0a84ff;
-    --accent-soft: rgba(10, 132, 255, 0.18);
-    --green: #30d158;
-    --green-soft: rgba(48, 209, 88, 0.16);
-    --orange: #ff9f0a;
-    --orange-soft: rgba(255, 159, 10, 0.16);
-    --red: #ff453a;
-    --red-soft: rgba(255, 69, 58, 0.16);
-    --material: rgba(30, 30, 32, 0.72);
-    --material-edge: rgba(255, 255, 255, 0.08);
-    --scrim: rgba(0, 0, 0, 0.5);
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.6);
+    --bg: #040a14;
+    --surface: #0e1829;
+    --surface-2: #19253a;
+    --text: #eef2f8;
+    --text-2: #9ba8bd;
+    --text-3: #7c889d;
+    --hairline: rgba(238, 242, 248, 0.1);
+    --accent: #2c67aa;
+    --accent-ink: #8fbcec;
+    --accent-soft: rgba(110, 165, 230, 0.16);
+    --gold: #f0b430;
+    --gold-ink: #f3c25a;
+    --gold-soft: rgba(240, 180, 48, 0.16);
+    --green: #3ad26a;
+    --green-soft: rgba(48, 209, 88, 0.15);
+    --red: #ff5a50;
+    --red-soft: rgba(255, 69, 58, 0.15);
+    --material: rgba(10, 18, 32, 0.72);
+    --material-edge: rgba(255, 255, 255, 0.07);
+    --scrim: rgba(0, 3, 10, 0.55);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.65);
     color-scheme: dark;
   }
 }
@@ -61,11 +70,13 @@
   --color-text-3: var(--text-3);
   --color-hairline: var(--hairline);
   --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
   --color-accent-soft: var(--accent-soft);
+  --color-gold: var(--gold);
+  --color-gold-ink: var(--gold-ink);
+  --color-gold-soft: var(--gold-soft);
   --color-green: var(--green);
   --color-green-soft: var(--green-soft);
-  --color-orange: var(--orange);
-  --color-orange-soft: var(--orange-soft);
   --color-red: var(--red);
   --color-red-soft: var(--red-soft);
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
@@ -156,7 +167,7 @@ body {
 }
 
 :focus-visible {
-  outline: 3px solid var(--accent);
+  outline: 3px solid var(--accent-ink);
   outline-offset: 2px;
   border-radius: 0.5rem;
 }
@@ -172,11 +183,23 @@ body {
   }
 }
 
-@media (prefers-contrast: more) {
+@media (prefers-contrast: more) and (prefers-color-scheme: light) {
   :root {
-    --hairline: rgba(0, 0, 0, 0.4);
-    --text-2: #3a3a3c;
+    --hairline: rgba(13, 26, 43, 0.45);
+    --text-2: #2f3a4d;
+    --accent-ink: #0a3a6e;
+    --gold-ink: #6b4600;
   }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root {
+    --hairline: rgba(238, 242, 248, 0.45);
+    --text-2: #c9d2e0;
+    --accent-ink: #b3d3f5;
+    --gold-ink: #ffd27a;
+  }
+}
+@media (prefers-contrast: more) {
   .material,
   .material-thick,
   .card {

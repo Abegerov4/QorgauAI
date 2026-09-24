@@ -24,7 +24,7 @@ export function Thinking({ startedAt, withDocument, onCancel }: { startedAt: num
         Агент ищет статьи в Конституции и Трудовом кодексе, пишет ответ, а второй агент проверяет, что каждое
         утверждение подтверждено текстом закона. {withDocument ? "Проверка договора обычно занимает до минуты." : "Обычно 10–30 секунд."}
       </p>
-      <button onClick={onCancel} className="pressable t-caption mt-3 font-semibold text-accent">
+      <button onClick={onCancel} className="pressable t-caption mt-3 font-semibold text-accent-ink">
         Отменить
       </button>
     </div>

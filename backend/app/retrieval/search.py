@@ -78,6 +78,15 @@ def _code_filter(code: str | None) -> models.Filter | None:
     return models.Filter(must=[models.FieldCondition(key="code", match=models.MatchValue(value=CODE_NAMES[code]))])
 
 
+def _search_filter(code: str | None) -> models.Filter:
+    """Search skips repealed provisions ("исключен Законом ...") and bare
+    list items ("отпуска."): both match queries by topic words but carry no
+    norm on their own. get_article still returns them in place."""
+    flt = _code_filter(code) or models.Filter()
+    flt.must_not = [models.FieldCondition(key="chunk_type", match=models.MatchAny(any=["repealed", "fragment"]))]
+    return flt
+
+
 @observe(name="retrieve-hybrid", as_type="retriever", capture_input=False, capture_output=False)
 def hybrid_search(
     query: str,
@@ -92,7 +101,7 @@ def hybrid_search(
     client = get_client()
     dense_vec = embed_dense([query])[0]
     sparse_vec = embed_sparse([query])[0]
-    flt = _code_filter(code)
+    flt = _search_filter(code)
 
     result = client.query_points(
         collection_name=COLLECTION_NAME,
@@ -122,7 +131,7 @@ def dense_only_search(query: str, top_k: int = 5, code: str | None = None) -> li
         collection_name=COLLECTION_NAME,
         query=dense_vec,
         using=DENSE_VECTOR_NAME,
-        query_filter=_code_filter(code),
+        query_filter=_search_filter(code),
         limit=top_k,
         with_payload=True,
     )

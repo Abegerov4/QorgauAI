@@ -148,7 +148,7 @@ function Column({
                 </div>
                 <p className="t-caption mt-1.5 line-clamp-3 text-text-2">{c.text}</p>
                 {unique && (
-                  <span className="t-caption mt-2 inline-block rounded-full bg-accent-soft px-2 py-0.5 font-medium text-accent">
+                  <span className="t-caption mt-2 inline-block rounded-full bg-gold-soft px-2 py-0.5 font-medium text-gold-ink">
                     только здесь
                   </span>
                 )}

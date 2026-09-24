@@ -15,7 +15,7 @@ export function DocumentCard({ doc }: { doc: DocumentResponse }) {
   return (
     <article className="card p-5 sm:p-6">
       <div className="flex items-start gap-3.5">
-        <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent" aria-hidden>
+        <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent-ink" aria-hidden>
           <DocIcon />
         </div>
         <div className="min-w-0 flex-1">
@@ -41,7 +41,7 @@ export function DocumentCard({ doc }: { doc: DocumentResponse }) {
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="pressable t-caption mt-4 font-semibold text-accent"
+        className="pressable t-caption mt-4 font-semibold text-accent-ink"
       >
         {open ? "Скрыть пункты" : "Показать извлечённые пункты"}
       </button>

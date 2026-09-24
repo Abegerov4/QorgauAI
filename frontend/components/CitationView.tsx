@@ -85,7 +85,7 @@ function ArticleView({ citation }: { citation: Extract<Citation, { kind: "law" }
               <div
                 key={i}
                 ref={isCited ? highlighted : undefined}
-                className={`rounded-xl px-3 py-2 ${isCited ? "bg-accent-soft" : ""}`}
+                className={`rounded-xl px-3 py-2 ${isCited ? "bg-gold-soft shadow-[inset_3px_0_0_var(--gold)]" : ""}`}
               >
                 {p.point && <p className="t-caption font-semibold text-text-2">{p.point}</p>}
                 <p className="t-body">{p.text}</p>

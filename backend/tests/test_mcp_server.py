@@ -40,3 +40,17 @@ def test_search_respects_code_filter():
     assert results
     assert all(r["code"] == "Конституция Республики Казахстан" for r in results)
     assert results[0]["citation"].startswith("Конституция Республики Казахстан, Статья 9")
+
+
+@pytest.mark.skipif(not OPENAI_API_KEY, reason="needs OPENAI_API_KEY for dense embeddings")
+def test_search_skips_repealed_and_fragments():
+    # Before the filter, "отпуск" queries returned "отпуска." and
+    # "Подпункт 3) исключен Законом РК ..." in the top 5.
+    for query in ("отпуск 24 дня", "принципы трудового законодательства"):
+        results = call("search_legal_corpus", {"query": query, "top_k": 10})
+        assert all(len(r["text"]) >= 40 and not r["text"].lower().startswith("исключен") for r in results)
+
+
+def test_get_article_keeps_fragments_in_place():
+    points = call("get_article", {"code": "labor_code", "article_number": "8"})["points"]
+    assert {"point": "Пункт 1, подпункт 1)", "text": "трудовые;"}.items() <= points[1].items()

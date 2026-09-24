@@ -105,6 +105,22 @@ class ParserState:
     buffer: list[str] = field(default_factory=list)
 
 
+# "Подпункт 3) исключен Законом РК от ..." -- the provision no longer exists.
+# Kept in the index so get_article shows the article as it stands, but
+# excluded from search (app/retrieval/search.py).
+REPEALED_RE = re.compile(r"^\s*(исключен|утратил)", re.IGNORECASE)
+# A subpoint shorter than this ("трудовые;", "отпуска.") is a list item that
+# only makes sense with its lead-in; it stays in get_article but not in search.
+FRAGMENT_MAX_CHARS = 40
+
+
+def _chunk_type(text: str, point_label: str) -> str:
+    if REPEALED_RE.match(text):
+        return "repealed"
+    if not point_label:
+        return "article_full"
+    return "fragment" if len(text) < FRAGMENT_MAX_CHARS else "norm"
+
 def extract_lines(path: Path) -> list[Line]:
     suffix = path.suffix.lower()
     if suffix in (".html", ".htm"):
@@ -221,7 +237,7 @@ def _flush(state: ParserState, code_name: str, source_note: str, out: list[dict]
             "article_number": state.article_num,
             "chunk_index": len(out),
             "point": point_label,
-            "chunk_type": "norm" if point_label else "article_full",
+            "chunk_type": _chunk_type(text, point_label),
             "source": source_note,
         }
     )
