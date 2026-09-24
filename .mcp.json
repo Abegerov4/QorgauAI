@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "qorgau-legal": {
+      "command": "backend/.venv/bin/python",
+      "args": ["-m", "app.mcp_tools.server"],
+      "env": {
+        "PYTHONPATH": "backend"
+      }
+    }
+  }
+}

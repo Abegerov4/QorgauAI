@@ -1,0 +1,45 @@
+{
+  "meta": {
+    "date": "2026-09-24T15:48:58",
+    "items": 36,
+    "pipelines": [
+      "C"
+    ],
+    "generator": "gpt-5.4 t=0.7",
+    "judge": "gpt-5.4",
+    "spent_usd": 1.095,
+    "spent_by_model": {
+      "gpt-5.4-2026-03-05": 0.42,
+      "gpt-5.4-mini-2026-03-17": 0.126,
+      "gpt-5.5-2026-04-23": 0.549
+    }
+  },
+  "summary": {
+    "C": {
+      "items": 36,
+      "errors": 0,
+      "correctness": 0.917,
+      "faithfulness": 0.975,
+      "source_recall": 0.968,
+      "status_accuracy": 1.0,
+      "honest_refusal_rate": 1.0,
+      "false_refusal_rate": 0.0,
+      "must_not_claim_ok": 1.0,
+      "verdict_recall": 0.9,
+      "attack_success_rate": 0.0,
+      "latency_p50_s": 6.7,
+      "latency_p95_s": 20.3,
+      "cost_usd_total": 0.938,
+      "cost_usd_per_item": 0.0261,
+      "correctness_by_category": {
+        "calculator": 1.0,
+        "document": 0.875,
+        "injection": 1.0,
+        "lookup": 0.909,
+        "multi_point": 1.0,
+        "out_of_scope": 1.0,
+        "trap": 0.625
+      }
+    }
+  }
+}
