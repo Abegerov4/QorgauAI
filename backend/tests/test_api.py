@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -46,3 +48,33 @@ def test_article_endpoint():
 
 def test_article_unknown_code_returns_404():
     assert client.get("/articles/civil_code/1").status_code == 404
+
+
+def test_ask_stream_without_lifespan_returns_503():
+    resp = client.post("/ask/stream", json={"question": "test"})
+    assert resp.status_code == 503
+
+
+def test_ask_stream_sends_progress_then_final(monkeypatch):
+    final = {
+        "status": "answered", "answer": "a", "claims": [], "sources": [], "missing_info": [],
+        "removed_claims": [], "recommend_lawyer": False, "disclaimer": "d",
+    }
+    tool = {"name": "get_article", "args": {"code": "labor_code", "article_number": "88"},
+            "found": ["Трудовой кодекс Республики Казахстан, Статья 88"], "result": None, "attempt": 0}
+
+    async def fake_answer(graph, question, *, on_event, **kw):
+        await on_event({"type": "step", "node": "research"})
+        await on_event({"type": "tool", **tool})
+        return {"final": final, "path": ["guard_input", "research", "verify", "finalize"], "attempt": 0,
+                "tool_log": [tool], "verification": {"checks": [{"supported": True}, {"supported": False}]}}
+
+    monkeypatch.setattr("app.api.routes.answer_question", fake_answer)
+    monkeypatch.setattr(app.state, "graph", object(), raising=False)
+    resp = client.post("/ask/stream", json={"question": "test"})
+    assert resp.status_code == 200
+    events = [block.split("\n")[0].removeprefix("event: ") for block in resp.text.strip().split("\n\n")]
+    assert events == ["step", "tool", "final"]
+    body = json.loads(resp.text.strip().split("\n\n")[-1].split("data: ", 1)[1])
+    assert body["tool_calls"][0]["found"] == tool["found"]
+    assert (body["checked_claims"], body["supported_claims"]) == (2, 1)

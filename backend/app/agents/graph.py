@@ -14,6 +14,9 @@ citation by construction.
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -58,6 +61,18 @@ class AgentState(TypedDict, total=False):
     path: list[str]  # nodes visited, for the UI and evals
     document_block: str | None  # uploaded document clauses, PII-masked, already wrapped as untrusted
     max_research_steps: int
+    tool_log: list[dict]  # {"name", "args", "found", "result", "attempt"}: what the planner did, for the UI
+
+
+# Live progress for /ask/stream. answer_question sets the callback; LangGraph
+# runs nodes as asyncio tasks, which inherit the context, so nodes can report
+# without the callback travelling through the state.
+_ON_EVENT: ContextVar[Callable[[dict], Awaitable[None]] | None] = ContextVar("on_event", default=None)
+
+
+async def _emit(event: dict) -> None:
+    if (callback := _ON_EVENT.get()) is not None:
+        await callback(event)
 
 
 # --------------------------------------------------------------------- nodes
@@ -65,6 +80,7 @@ class AgentState(TypedDict, total=False):
 
 @observe(name="guard-input", as_type="guardrail", capture_input=False, capture_output=False)
 async def guard_input(state: AgentState) -> AgentState:
+    await _emit({"type": "step", "node": "guard_input"})
     masked, mapping = mask_pii(state["question"])
     langfuse.update_current_span(
         input={"question": state["question"]},  # masked again at export
@@ -76,6 +92,7 @@ async def guard_input(state: AgentState) -> AgentState:
         "attempt": 0,
         "evidence": list(state.get("evidence") or []),  # uploaded document clauses (D-ids), if any
         "path": ["guard_input"],
+        "tool_log": [],
     }
 
 
@@ -90,6 +107,20 @@ def _evidence_from_tool(name: str, payload: Any) -> list[dict]:
             text += " " + payload["note"]
         return [{"citation": "Калькулятор отпуска по нормам: " + "; ".join(payload["citations"]), "text": text, "tool": name}]
     return []
+
+
+def _log_entry(name: str, args: dict, payload: Any, attempt: int) -> dict:
+    """One tool call as the UI shows it: what was asked and which norms came back."""
+    found: list[str] = []
+    result = None
+    if name == "search_legal_corpus" and isinstance(payload, list):
+        found = [r["citation"] for r in payload]
+    elif name == "get_article" and isinstance(payload, dict) and payload.get("found") and payload.get("points"):
+        found = [re.sub(r",\s*Пункт.*$", "", payload["points"][0]["citation"])]  # the article, not its first point
+    elif name == "calculate_vacation_days" and isinstance(payload, dict):
+        found = list(payload.get("citations") or [])
+        result = f"{payload['total_days']} календарных дней"
+    return {"name": name, "args": args, "found": list(dict.fromkeys(found)), "result": result, "attempt": attempt}
 
 
 def _merge_evidence(existing: list[dict], new: list[dict]) -> list[dict]:
@@ -118,6 +149,7 @@ def make_research(toolbox: LegalToolbox):
 
     @observe(name="research", as_type="agent", capture_input=False, capture_output=False)
     async def research(state: AgentState) -> AgentState:
+        await _emit({"type": "step", "node": "research"})
         messages = list(state.get("research_messages") or [])
         if not messages:
             user_msg = "Вопрос пользователя:\n" + wrap_untrusted("user", state["question"])
@@ -132,6 +164,7 @@ def make_research(toolbox: LegalToolbox):
         langfuse.update_current_span(input={"question": state["question"], "attempt": state["attempt"], "feedback": state.get("feedback")})
 
         evidence = list(state.get("evidence") or [])
+        tool_log = list(state.get("tool_log") or [])
         summary: ResearchSummary | None = None
         max_steps = state.get("max_research_steps") or config.MAX_RESEARCH_STEPS
         for step in range(max_steps + 1):
@@ -152,14 +185,20 @@ def make_research(toolbox: LegalToolbox):
                     summary = ResearchSummary.model_validate(args)
                     result_text = "ok"
                 else:
+                    shown_args = dict(args)
                     if call.function.name == "search_legal_corpus":
                         args["rerank"] = config.RERANK
                     raw, is_error = await toolbox.call(call.function.name, args)
+                    payload = None
                     if not is_error:
                         try:
-                            evidence = _merge_evidence(evidence, _evidence_from_tool(call.function.name, json.loads(raw)))
+                            payload = json.loads(raw)
+                            evidence = _merge_evidence(evidence, _evidence_from_tool(call.function.name, payload))
                         except json.JSONDecodeError:
                             pass
+                    entry = _log_entry(call.function.name, shown_args, payload, state["attempt"])
+                    tool_log.append(entry)
+                    await _emit({"type": "tool", **entry})
                     result_text = wrap_untrusted(f"tool:{call.function.name}", raw)
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result_text})
             if summary is not None:
@@ -172,6 +211,7 @@ def make_research(toolbox: LegalToolbox):
             "research_messages": messages,
             "evidence": evidence,
             "summary": summary.model_dump() if summary else None,
+            "tool_log": tool_log,
             "path": [*state["path"], "research"],
         }
 
@@ -184,6 +224,7 @@ def _evidence_block(evidence: list[dict]) -> str:
 
 @observe(name="generate-answer", as_type="agent", capture_input=False, capture_output=False)
 async def generate(state: AgentState) -> AgentState:
+    await _emit({"type": "step", "node": "generate"})
     evidence = state["evidence"]
     missing = (state.get("summary") or {}).get("missing_info") or []
     langfuse.update_current_span(input={"question": state["question"], "evidence_ids": [e["id"] for e in evidence]})
@@ -209,6 +250,7 @@ async def generate(state: AgentState) -> AgentState:
 
 @observe(name="verify-claims", as_type="agent", capture_input=False, capture_output=False)
 async def verify(state: AgentState) -> AgentState:
+    await _emit({"type": "step", "node": "verify"})
     evidence_ids = {e["id"] for e in state["evidence"]}
     claims = state["draft"]["claims"]
     claims_block = "\n".join(
@@ -238,11 +280,13 @@ async def verify(state: AgentState) -> AgentState:
         checks.append({"claim_index": i, "supported": supported, "confidence": check.confidence if check else 0.0, "explanation": explanation})
     all_supported = all(c["supported"] for c in checks)
     langfuse.update_current_span(output={"all_supported": all_supported, "checks": checks})
+    await _emit({"type": "verified", "checked": len(checks), "supported": sum(c["supported"] for c in checks)})
     return {"verification": {"checks": checks, "all_supported": all_supported}, "path": [*state["path"], "verify"]}
 
 
 @observe(name="rewrite-query", as_type="span", capture_input=False, capture_output=False)
 async def rewrite_query(state: AgentState) -> AgentState:
+    await _emit({"type": "step", "node": "rewrite_query"})
     claims = state["draft"]["claims"]
     failed = [
         f"- «{claims[c['claim_index']]['text']}» — {c['explanation']}"
@@ -261,6 +305,7 @@ async def rewrite_query(state: AgentState) -> AgentState:
 
 @observe(name="finalize-answer", as_type="span", capture_input=False, capture_output=False)
 async def finalize(state: AgentState) -> AgentState:
+    await _emit({"type": "step", "node": "finalize"})
     summary = state.get("summary") or {}
     evidence = {e["id"]: e for e in state.get("evidence") or []}
     draft = state.get("draft")
@@ -341,12 +386,16 @@ async def answer_question(
     document=None,
     session_id: str | None = None,
     tags: list[str] | None = None,
+    on_event: Callable[[dict], Awaitable[None]] | None = None,
 ) -> dict:
     """Run pipeline C as one Langfuse trace. Returns the final state.
 
     `document` is an IngestedDocument: its clauses enter the graph as
     evidence items D<n>, so claims about the contract are cited and verified
-    exactly like claims about the law."""
+    exactly like claims about the law.
+
+    `on_event` receives live progress: {"type": "step", "node"} when a node
+    starts and {"type": "tool", ...} after each MCP tool call."""
     with langfuse.start_as_current_observation(
         as_type="agent", name="answer-question", input={"question": question}
     ) as root, propagate_attributes(
@@ -367,7 +416,11 @@ async def answer_question(
                 wrap_untrusted(e["id"], f"[{e['id']}] {e['citation']}: {e['text']}") for e in document.evidence
             )
             initial["max_research_steps"] = config.MAX_RESEARCH_STEPS_DOCUMENT
-        state = await graph.ainvoke(initial)
+        token = _ON_EVENT.set(on_event)
+        try:
+            state = await graph.ainvoke(initial)
+        finally:
+            _ON_EVENT.reset(token)
         final = state["final"]
         root.update(
             output={"status": final["status"], "answer": final["answer"], "sources": final["sources"]},

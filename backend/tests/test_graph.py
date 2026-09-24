@@ -91,3 +91,34 @@ def test_finalize_refuses_out_of_scope():
     assert final["status"] == "refused"
     assert "вне тем" in final["answer"]
     assert final["sources"] == []
+
+
+def test_log_entry_keeps_what_the_ui_shows():
+    search = graph._log_entry("search_legal_corpus", {"query": "отпуск"}, [{"citation": "A"}, {"citation": "B"}, {"citation": "A"}], 0)
+    assert search["found"] == ["A", "B"]
+    article = graph._log_entry(
+        "get_article", {"code": "labor_code", "article_number": "88"},
+        {"found": True, "points": [{"citation": "Трудовой кодекс Республики Казахстан, Статья 88, Пункт 1"}]}, 1,
+    )
+    assert article["found"] == ["Трудовой кодекс Республики Казахстан, Статья 88"] and article["attempt"] == 1
+    calc = graph._log_entry("calculate_vacation_days", {}, {"total_days": 30, "citations": ["X"], "breakdown": []}, 0)
+    assert calc["result"] == "30 календарных дней" and calc["found"] == ["X"]
+    assert graph._log_entry("search_legal_corpus", {"query": "q"}, None, 0)["found"] == []  # tool error
+
+
+def test_nodes_report_progress_only_when_asked():
+    events = []
+
+    async def collect(e):
+        events.append(e)
+
+    async def run():
+        await graph._emit({"type": "step", "node": "x"})  # no callback: nothing happens
+        token = graph._ON_EVENT.set(collect)
+        try:
+            await graph._emit({"type": "step", "node": "y"})
+        finally:
+            graph._ON_EVENT.reset(token)
+
+    asyncio.run(run())
+    assert events == [{"type": "step", "node": "y"}]

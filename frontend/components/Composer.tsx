@@ -38,7 +38,7 @@ export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attach
   }
 
   return (
-    <div className="material-thick rounded-[1.625rem] p-1.5">
+    <div className="material-thick composer rounded-[1.625rem] p-1.5">
       <AnimatePresence initial={false}>
         {attachment && (
           <motion.div
@@ -74,7 +74,7 @@ export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attach
         <button
           onClick={() => file.current?.click()}
           disabled={!!attachment?.uploading}
-          className="pressable grid size-10 shrink-0 place-items-center rounded-full text-text-2 hover:bg-surface-2 disabled:opacity-40"
+          className="pressable grid size-10 shrink-0 place-items-center rounded-full text-text-2 hover:bg-surface-2 hover:text-text disabled:opacity-40"
           aria-label="Загрузить договор (PDF, JPG, PNG)"
           title="Загрузить договор (PDF, JPG, PNG)"
         >
@@ -115,7 +115,7 @@ export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attach
         <button
           onClick={onSubmit}
           disabled={!canSend}
-          className="pressable grid size-10 shrink-0 place-items-center rounded-full bg-accent text-white disabled:bg-text-3/30"
+          className="pressable grid size-10 shrink-0 place-items-center rounded-full bg-accent text-white disabled:bg-surface-2 disabled:text-text-3"
           aria-label="Отправить"
         >
           <svg width="14" height="16" viewBox="0 0 14 16" fill="none" aria-hidden>

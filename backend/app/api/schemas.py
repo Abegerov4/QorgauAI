@@ -72,9 +72,32 @@ class DocumentResponse(BaseModel):
     clauses: list[Clause]
 
 
+class ToolCall(BaseModel):
+    name: str = Field(description="MCP tool: search_legal_corpus, get_article or calculate_vacation_days.")
+    args: dict
+    found: list[str] = Field(description="Citations the tool returned (for get_article: the article itself).")
+    result: str | None = Field(None, description="Short result of a calculation, e.g. '30 календарных дней'.")
+    attempt: int = Field(description="0 for the first research pass, 1 after rewrite_query.")
+
+
 class AskResponse(FinalAnswer):
     path: list[str] = Field(description="Graph nodes visited, e.g. guard_input -> research -> generate -> verify -> finalize.")
     attempts: int
+    tool_calls: list[ToolCall] = Field(default_factory=list, description="What the research agent did, in order.")
+    checked_claims: int = Field(0, description="Claims the verifier checked on the last pass.")
+    supported_claims: int = Field(0, description="Of those, confirmed by the cited norms.")
+
+    @classmethod
+    def from_state(cls, state: dict) -> "AskResponse":
+        checks = (state.get("verification") or {}).get("checks") or []
+        return cls(
+            **state["final"],
+            path=state["path"],
+            attempts=state.get("attempt", 0) + 1,
+            tool_calls=state.get("tool_log") or [],
+            checked_claims=len(checks),
+            supported_claims=sum(c["supported"] for c in checks),
+        )
 
 
 class VacationCalcRequest(BaseModel):

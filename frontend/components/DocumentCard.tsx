@@ -3,9 +3,8 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import type { DocumentResponse } from "@/lib/api";
-import { DOC_TYPE_LABELS, PII_LABELS, TOPIC_LABELS } from "@/lib/labels";
+import { DOC_TYPE_LABELS, PII_LABELS, TOPIC_LABELS, plural } from "@/lib/labels";
 import { spring } from "@/lib/motion";
-import { plural } from "./AnswerCard";
 
 export function DocumentCard({ doc }: { doc: DocumentResponse }) {
   const [open, setOpen] = useState(false);

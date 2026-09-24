@@ -3,9 +3,10 @@
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "motion/react";
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type AskResponse, type Clause, type DocumentResponse } from "@/lib/api";
+import { api, type AgentEvent, type AskResponse, type Clause, type DocumentResponse } from "@/lib/api";
 import type { Citation } from "@/lib/citations";
 import { spring, springSnappy } from "@/lib/motion";
+import type { Trace } from "./AgentSteps";
 import { AnswerCard } from "./AnswerCard";
 import { CitationView } from "./CitationView";
 import { ACCEPT, Composer } from "./Composer";
@@ -17,7 +18,7 @@ import { Thinking } from "./Thinking";
 type Item =
   | { id: string; kind: "question"; text: string; withDocument: string | null }
   | { id: string; kind: "document"; doc: DocumentResponse }
-  | { id: string; kind: "pending"; startedAt: number; withDocument: boolean }
+  | { id: string; kind: "pending"; startedAt: number; withDocument: boolean; trace: Trace }
   | { id: string; kind: "answer"; answer: AskResponse; seconds: number }
   | { id: string; kind: "error"; message: string };
 
@@ -25,14 +26,48 @@ type Tab = "assistant" | "search";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const REVIEW_QUESTION = "Проверь мой трудовой договор на соответствие Трудовому кодексу РК.";
-const EXAMPLES = [
-  "Сколько дней ежегодного отпуска положено работнику?",
-  "Какой максимальный испытательный срок?",
-  "Как оплачивается сверхурочная работа?",
-  "Что такое Курултай по Конституции?",
+const EXAMPLES: { label: string; question: string; icon: React.ReactNode }[] = [
+  {
+    label: "Ежегодный отпуск",
+    question: "Сколько дней ежегодного отпуска положено работнику?",
+    icon: (
+      <>
+        <rect x="2" y="3" width="12" height="11" rx="2" />
+        <path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" />
+      </>
+    ),
+  },
+  {
+    label: "Испытательный срок",
+    question: "Какой максимальный испытательный срок?",
+    icon: <path d="M4 1.5h8M4 14.5h8M4.5 1.5c0 3.5 3.5 4 3.5 6.5s-3.5 3-3.5 6.5M11.5 1.5c0 3.5-3.5 4-3.5 6.5s3.5 3 3.5 6.5" />,
+  },
+  {
+    label: "Сверхурочные",
+    question: "Как оплачивается сверхурочная работа?",
+    icon: (
+      <>
+        <circle cx="8" cy="8" r="6.25" />
+        <path d="M8 4.5V8l2.5 1.5" />
+      </>
+    ),
+  },
+  {
+    label: "Курултай",
+    question: "Что такое Курултай по Конституции?",
+    icon: <path d="M2 6h12L8 2.5zM3.5 6v6M6.5 6v6M9.5 6v6M12.5 6v6M2 13.5h12" />,
+  },
 ];
 
 const uid = () => crypto.randomUUID();
+
+function applyEvent(t: Trace, e: AgentEvent): Trace {
+  if (e.type === "step") return { ...t, path: [...t.path, e.node], verified: e.node === "verify" ? [...t.verified, undefined] : t.verified };
+  if (e.type === "tool") {
+    return { ...t, tools: [...t.tools, { name: e.name, args: e.args, found: e.found, result: e.result, attempt: e.attempt }] };
+  }
+  return { ...t, verified: [...t.verified.slice(0, -1), { checked: e.checked, supported: e.supported }] };
+}
 
 export function QorgauApp() {
   const [tab, setTab] = useState<Tab>("assistant");
@@ -94,12 +129,14 @@ export function QorgauApp() {
     setItems((xs) => [
       ...xs,
       { id: uid(), kind: "question", text: question, withDocument: docId ? attachment!.name : null },
-      { id: pendingId, kind: "pending", startedAt, withDocument: !!docId },
+      { id: pendingId, kind: "pending", startedAt, withDocument: !!docId, trace: { path: [], tools: [], verified: [] } },
     ]);
     const controller = new AbortController();
     abort.current = controller;
     try {
-      const answer = await api.ask(question, sessionId.current, docId, controller.signal);
+      const onEvent = (e: AgentEvent) =>
+        setItems((xs) => xs.map((x) => (x.id === pendingId && x.kind === "pending" ? { ...x, trace: applyEvent(x.trace, e) } : x)));
+      const answer = await api.askStream(question, sessionId.current, docId, onEvent, controller.signal);
       const seconds = (Date.now() - startedAt) / 1000;
       setItems((xs) => xs.map((x) => (x.id === pendingId ? { id: pendingId, kind: "answer", answer, seconds } : x)));
     } catch (e) {
@@ -109,6 +146,24 @@ export function QorgauApp() {
       abort.current = null;
     }
   }
+
+  // An empty chat shows the composer under the heading; with the first
+  // message it moves to the bottom bar (a shared layout animation).
+  const hero = items.length === 0;
+  const composer = (
+    <motion.div layoutId="composer" transition={spring}>
+      <Composer
+        value={draft}
+        onChange={setDraft}
+        onSubmit={() => send()}
+        onAttach={attach}
+        onDetach={() => setAttachment(null)}
+        attachment={attachment}
+        busy={busy}
+        placeholder={attachment ? "Что проверить в договоре?" : "Спросите о трудовых правах"}
+      />
+    </motion.div>
+  );
 
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
@@ -132,7 +187,7 @@ export function QorgauApp() {
       >
         <Header tab={tab} onTab={setTab} online={online} />
 
-        <main className="mx-auto w-full max-w-3xl px-4 pt-8 pb-48 sm:px-6">
+        <main className={`mx-auto w-full max-w-3xl px-4 pt-8 sm:px-6 ${hero ? "pb-8" : "pb-48"}`}>
           <AnimatePresence mode="wait" initial={false}>
             {tab === "assistant" ? (
               <motion.div
@@ -143,7 +198,9 @@ export function QorgauApp() {
                 transition={springSnappy}
               >
                 {items.length === 0 ? (
-                  <Empty onPick={(q) => send(q)} disabled={online === false} />
+                  <Empty onPick={(q) => send(q)} disabled={online === false}>
+                    {composer}
+                  </Empty>
                 ) : (
                   <div className="space-y-4" aria-live="polite">
                     {items.map((item) => (
@@ -179,24 +236,14 @@ export function QorgauApp() {
           </AnimatePresence>
         </main>
 
-        {tab === "assistant" && (
+        {tab === "assistant" && !hero && (
           <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30">
             <div className="h-10 bg-gradient-to-t from-bg to-transparent" />
-            <div className="pointer-events-auto bg-bg px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6">
-              <div className="mx-auto max-w-3xl">
-                <Composer
-                  value={draft}
-                  onChange={setDraft}
-                  onSubmit={() => send()}
-                  onAttach={attach}
-                  onDetach={() => setAttachment(null)}
-                  attachment={attachment}
-                  busy={busy}
-                  placeholder={attachment ? "Что проверить в договоре?" : "Спросите о трудовых правах"}
-                />
-                <p className="t-caption mt-2 px-3 text-center text-text-3">
-                  ИИН, телефоны и счета скрываются до отправки в модель. Ответ — информация, а не юридическая консультация.
-                </p>
+            <div className="pointer-events-auto bg-bg pb-[max(1rem,env(safe-area-inset-bottom))]">
+              {/* Same box as <main>, so the composer lines up with the chat column. */}
+              <div className="mx-auto max-w-3xl px-4 sm:px-6">
+                {composer}
+                <Disclaimer />
               </div>
             </div>
           </div>
@@ -238,7 +285,9 @@ function ThreadItem({ item, onCite, onCancel }: { item: Item; onCite: (c: Citati
     case "document":
       return <DocumentCard doc={item.doc} />;
     case "pending":
-      return <Thinking startedAt={item.startedAt} withDocument={item.withDocument} onCancel={onCancel} />;
+      return (
+        <Thinking startedAt={item.startedAt} withDocument={item.withDocument} trace={item.trace} onCite={onCite} onCancel={onCancel} />
+      );
     case "answer":
       return <AnswerCard answer={item.answer} seconds={item.seconds} onCite={onCite} />;
     case "error":
@@ -253,29 +302,66 @@ function ThreadItem({ item, onCite, onCancel }: { item: Item; onCite: (c: Citati
   }
 }
 
-function Empty({ onPick, disabled }: { onPick: (q: string) => void; disabled: boolean }) {
+function Empty({
+  onPick,
+  disabled,
+  children,
+}: {
+  onPick: (q: string) => void;
+  disabled: boolean;
+  children: React.ReactNode;
+}) {
+  const pill =
+    "pressable t-caption inline-flex items-center gap-1.5 rounded-full border border-hairline bg-surface px-3 py-2 font-medium text-text-2 hover:bg-surface-2 hover:text-text disabled:opacity-50";
   return (
-    <div className="pt-6 sm:pt-12">
-      <Logo size={72} />
-      <p className="t-eyebrow mt-6 text-gold-ink">Конституция · Трудовой кодекс РК</p>
-      <h1 className="t-display mt-2 max-w-xl">Трудовые права — со ссылкой на закон</h1>
-      <p className="t-body mt-3 max-w-xl text-text-2">
-        QorgauAI отвечает по Конституции (ред. 2026) и Трудовому кодексу Республики Казахстан. Каждое утверждение
-        проверяется вторым агентом и открывается до текста статьи. Можно загрузить трудовой договор — PDF или фото.
+    // Header 3.5rem + main's top and bottom padding 2 × 2rem.
+    <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col items-center justify-center text-center">
+      <Logo size={64} />
+      <p className="t-eyebrow mt-5 text-gold-ink">Конституция · Трудовой кодекс РК</p>
+      <h1 className="t-display mt-2 max-w-xl text-balance">Трудовые права — со ссылкой на закон</h1>
+      <p className="t-body mt-3 max-w-lg text-balance text-text-2">
+        Каждое утверждение проверяется вторым агентом и открывается до текста статьи.
       </p>
-      <div className="mt-8 grid gap-2.5 sm:grid-cols-2">
-        {EXAMPLES.map((q) => (
-          <button
-            key={q}
-            onClick={() => onPick(q)}
-            disabled={disabled}
-            className="pressable card t-body p-4 text-left hover:bg-surface-2 disabled:opacity-50"
-          >
-            {q}
+
+      <div className="mt-8 w-full text-left">{children}</div>
+
+      <div className="mt-4 flex flex-wrap justify-center gap-1.5">
+        {EXAMPLES.map((e) => (
+          <button key={e.label} onClick={() => onPick(e.question)} disabled={disabled} title={e.question} className={pill}>
+            <PillIcon className="text-accent-ink">{e.icon}</PillIcon>
+            {e.label}
           </button>
         ))}
       </div>
+      <Disclaimer />
     </div>
+  );
+}
+
+function Disclaimer() {
+  return (
+    <p className="t-caption mt-3 px-3 text-center text-text-3">
+      ИИН, телефоны и счета скрываются до отправки в модель. Ответ — информация, а не юридическая консультация.
+    </p>
+  );
+}
+
+function PillIcon({ className, children }: { className: string; children: React.ReactNode }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`shrink-0 ${className}`}
+      aria-hidden
+    >
+      {children}
+    </svg>
   );
 }
 

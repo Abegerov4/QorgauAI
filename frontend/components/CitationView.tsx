@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, type ArticleResponse, type Clause } from "@/lib/api";
+import type { ArticleResponse, Clause } from "@/lib/api";
+import { loadArticle } from "@/lib/articles";
 import type { Citation } from "@/lib/citations";
 import { TOPIC_LABELS } from "@/lib/labels";
 
@@ -44,8 +45,7 @@ function ArticleView({ citation }: { citation: Extract<Citation, { kind: "law" }
 
   useEffect(() => {
     let alive = true;
-    api
-      .article(citation.codeKey, citation.article)
+    loadArticle(citation.codeKey, citation.article)
       .then((a) => alive && setArticle(a))
       .catch((e: Error) => alive && setError(e.message));
     return () => {

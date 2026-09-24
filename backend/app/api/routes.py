@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
+
 from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from langfuse import propagate_attributes
 
 from app.agents.graph import answer_question
@@ -24,6 +29,7 @@ from app.retrieval.config import COLLECTION_NAME
 from app.retrieval.search import CODE_NAMES, dense_only_search, get_article, hybrid_search
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -102,6 +108,48 @@ def vacation_days(req: VacationCalcRequest) -> dict:
 async def ask(req: AskRequest, request: Request) -> AskResponse:
     """Pipeline C: guard_input -> research (MCP tools) -> generate -> verify
     -> (rewrite_query -> research, once) -> finalize."""
+    graph, document = _graph_and_document(req, request)
+    state = await answer_question(graph, req.question, document=document, session_id=req.session_id, tags=["api"])
+    return AskResponse.from_state(state)
+
+
+@router.post("/ask/stream")
+async def ask_stream(req: AskRequest, request: Request) -> StreamingResponse:
+    """Same as /ask, with live progress as Server-Sent Events:
+    `step` (a graph node started), `tool` (an MCP tool call and the norms it
+    returned), `verified` (claims checked), then `final` (the AskResponse) or
+    `error`. Closing the connection cancels the agent."""
+    graph, document = _graph_and_document(req, request)
+    queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
+
+    async def on_event(event: dict) -> None:
+        await queue.put((event["type"], {k: v for k, v in event.items() if k != "type"}))
+
+    async def run() -> None:
+        try:
+            state = await answer_question(
+                graph, req.question, document=document, session_id=req.session_id, tags=["api", "stream"], on_event=on_event
+            )
+            await queue.put(("final", AskResponse.from_state(state).model_dump()))
+        except Exception:
+            log.exception("ask/stream failed")
+            await queue.put(("error", {}))
+
+    async def events():
+        task = asyncio.create_task(run())
+        try:
+            while True:
+                name, data = await queue.get()
+                yield f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                if name in ("final", "error"):
+                    break
+        finally:
+            task.cancel()  # client went away or we are done
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
+
+
+def _graph_and_document(req: AskRequest, request: Request):
     graph = getattr(request.app.state, "graph", None)
     if graph is None:
         raise HTTPException(status_code=503, detail="Agent graph is not initialised (app started without lifespan).")
@@ -110,8 +158,7 @@ async def ask(req: AskRequest, request: Request) -> AskResponse:
         document = DOCUMENTS.get(req.document_id)
         if document is None:
             raise HTTPException(status_code=404, detail="Документ не найден: загрузите его заново через /documents.")
-    state = await answer_question(graph, req.question, document=document, session_id=req.session_id, tags=["api"])
-    return AskResponse(**state["final"], path=state["path"], attempts=state.get("attempt", 0) + 1)
+    return graph, document
 
 
 @router.post("/documents", response_model=DocumentResponse)

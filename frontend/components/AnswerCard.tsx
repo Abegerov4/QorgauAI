@@ -3,9 +3,11 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import type { AnswerStatus, AskResponse } from "@/lib/api";
-import { citationLabel, parseCitation, type Citation } from "@/lib/citations";
-import { NODE_LABELS } from "@/lib/labels";
+import { parseCitation, type Citation } from "@/lib/citations";
+import { plural } from "@/lib/labels";
 import { spring } from "@/lib/motion";
+import { AgentSteps, traceFromAnswer } from "./AgentSteps";
+import { CitationChip } from "./CitationChip";
 
 const STATUS: Record<AnswerStatus, { label: string; tone: string }> = {
   answered: { label: "Подтверждено нормами", tone: "bg-green-soft text-green" },
@@ -60,8 +62,8 @@ export function AnswerCard({ answer, seconds, onCite }: Props) {
 
       {answer.removed_claims.length > 0 && <RemovedClaims claims={answer.removed_claims} />}
 
-      <div className="mt-5 border-t border-hairline pt-4">
-        <Path path={answer.path} />
+      <div className="mt-5">
+        <AgentSteps trace={traceFromAnswer(answer)} onCite={onCite} />
         <p className="t-caption mt-3 text-text-3">{answer.disclaimer}</p>
       </div>
     </article>
@@ -73,21 +75,16 @@ function Claim({ text, sources, onCite, lead }: { text: string; sources: string[
     <div>
       <p className={lead ? "text-[1.1875rem] leading-[1.45] font-medium tracking-[-0.01em]" : "t-body"}>{text}</p>
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {sources.map((raw) => {
-          const c = parseCitation(raw);
-          return (
-            <button
-              key={raw}
-              onClick={() => onCite(c)}
-              title={raw}
-              className={`pressable t-caption rounded-full px-2.5 py-1 font-medium ${
-                c.kind === "doc" ? "bg-surface-2 text-text" : "bg-accent-soft text-accent-ink"
-              }`}
-            >
-              {citationLabel(c)}
-            </button>
-          );
-        })}
+        {sources.map((raw) => (
+          <CitationChip
+            key={raw}
+            raw={raw}
+            onCite={onCite}
+            className={`pressable t-caption rounded-full px-2.5 py-1 font-medium ${
+              parseCitation(raw).kind === "doc" ? "bg-surface-2 text-text" : "bg-accent-soft text-accent-ink"
+            }`}
+          />
+        ))}
       </div>
     </div>
   );
@@ -127,25 +124,4 @@ function RemovedClaims({ claims }: { claims: string[] }) {
       </AnimatePresence>
     </section>
   );
-}
-
-function Path({ path }: { path: string[] }) {
-  return (
-    <ol className="t-caption flex flex-wrap items-center gap-x-1.5 gap-y-1 text-text-3" aria-label="Шаги агента">
-      {path.map((node, i) => (
-        <li key={i} className="flex items-center gap-1.5">
-          {i > 0 && <span aria-hidden>›</span>}
-          <span className={node === "rewrite_query" ? "text-gold-ink" : ""}>{NODE_LABELS[node] ?? node}</span>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-export function plural(n: number, one: string, few: string, many: string) {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return one;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
-  return many;
 }

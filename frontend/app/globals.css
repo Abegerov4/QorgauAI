@@ -150,6 +150,10 @@ body {
   mask-image: linear-gradient(to bottom, black 70%, transparent);
 }
 
+.composer:focus-within {
+  box-shadow: inset 0 1px 0 var(--material-edge), var(--shadow-lg), 0 0 0 3px var(--accent-soft);
+}
+
 .card {
   background: var(--surface);
   border-radius: 1.25rem;
@@ -166,10 +170,15 @@ body {
   transform: scale(0.97);
 }
 
-:focus-visible {
-  outline: 3px solid var(--accent-ink);
-  outline-offset: 2px;
-  border-radius: 0.5rem;
+/* In the base layer, so utilities like outline-none can opt out (the composer
+   textarea shows focus on its whole bar via :focus-within). Unlayered, it
+   would beat every Tailwind utility regardless of specificity. */
+@layer base {
+  :focus-visible {
+    outline: 3px solid var(--accent-ink);
+    outline-offset: 2px;
+    border-radius: 0.5rem;
+  }
 }
 
 /* ----------------------------------------------------------- a11y modes */

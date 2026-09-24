@@ -8,3 +8,4 @@ node_modules/
 .DS_Store
 *.code-workspace
 backend/data/cache/
+.playwright-mcp/
