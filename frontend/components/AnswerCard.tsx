@@ -1,5 +1,7 @@
 "use client";
 
+import { HandThumbDownIcon, HandThumbUpIcon } from "@heroicons/react/24/outline";
+import { HandThumbDownIcon as HandThumbDownSolid, HandThumbUpIcon as HandThumbUpSolid } from "@heroicons/react/24/solid";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useState } from "react";
 import type { AnswerStatus, AskResponse } from "@/lib/api";
@@ -26,7 +28,7 @@ type Props = {
   /** Just arrived (not restored from history): words appear one by one. */
   fresh: boolean;
   feedback?: "up" | "down";
-  /** 👍/👎, sent to Langfuse on this answer's trace. */
+  /** Helpful / not helpful, sent to Langfuse on this answer's trace. */
   onRate: (helpful: boolean, comment?: string) => void;
 };
 
@@ -237,6 +239,8 @@ function Feedback({ value, onRate }: { value?: "up" | "down"; onRate: (helpful: 
   const [sent, setSent] = useState(false);
   const thumb = (up: boolean) => {
     const active = value === (up ? "up" : "down");
+    // Outline until chosen, then filled (Heroicons).
+    const Icon = up ? (active ? HandThumbUpSolid : HandThumbUpIcon) : active ? HandThumbDownSolid : HandThumbDownIcon;
     return (
       <button
         onClick={() => {
@@ -250,9 +254,7 @@ function Feedback({ value, onRate }: { value?: "up" | "down"; onRate: (helpful: 
           active ? (up ? "bg-green-soft text-green" : "bg-red-soft text-red") : "text-text-2 hover:bg-surface-2 hover:text-text"
         }`}
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden className={up ? "" : "rotate-180"}>
-          <path d="M5 7l2.6-4.8a1.3 1.3 0 012.4.8L9.4 6.5h3.3a1.5 1.5 0 011.5 1.8l-.9 4.5a1.5 1.5 0 01-1.5 1.2H5zM2 7h3v7H2z" />
-        </svg>
+        <Icon className="size-[18px]" aria-hidden />
       </button>
     );
   };
