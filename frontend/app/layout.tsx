@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { themeScript } from "@/lib/theme";
 
 export const metadata: Metadata = {
   title: "QorgauAI",
@@ -17,7 +18,17 @@ export const viewport: Viewport = {
 // covers Cyrillic without a web-font download.
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="ru" className="h-full">
+    // The inline script sets data-theme before hydration, hence the warning opt-out.
+    <html lang="ru" className="h-full" suppressHydrationWarning>
+      <head>
+        {/* Executable in the server HTML only; on the client React would warn
+            about a script tag it never runs (Next.js "preventing flash" guide). */}
+        <script
+          type={typeof window === "undefined" ? "text/javascript" : "text/plain"}
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: themeScript }}
+        />
+      </head>
       <body className="min-h-full">{children}</body>
     </html>
   );

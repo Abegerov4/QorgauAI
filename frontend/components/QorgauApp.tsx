@@ -17,6 +17,7 @@ import { DocumentCard } from "./DocumentCard";
 import { SearchCompare } from "./SearchCompare";
 import { Sheet } from "./Sheet";
 import { Thinking } from "./Thinking";
+import { ThemeToggle } from "./ThemeToggle";
 import { WordRotate } from "./WordRotate";
 
 type Item =
@@ -191,6 +192,44 @@ export function QorgauApp({ user, authEnabled }: { user: SignedInUser | null; au
     }
   }, []);
 
+  // Drag-and-drop of a contract anywhere on the page. `dragleave` is no use
+  // for hiding the overlay: it fires for every child the cursor crosses, and
+  // Safari sends none when a file is dragged out of the window or the drag is
+  // cancelled with Esc. While a file hovers, the browser repeats `dragover`
+  // every ~50 ms, so the overlay stays up only while that heartbeat lasts.
+  const attachRef = useRef(attach);
+  attachRef.current = attach;
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files");
+    let lastOver = 0;
+    const over = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault(); // allows the drop
+      lastOver = performance.now();
+      setDragging(true);
+    };
+    const reset = () => setDragging(false);
+    const drop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault(); // the browser would otherwise open the file
+      reset();
+      const f = e.dataTransfer?.files?.[0];
+      if (f && ACCEPT.split(",").includes(f.type)) attachRef.current(f);
+    };
+    const watchdog = setInterval(() => lastOver && performance.now() - lastOver > 250 && ((lastOver = 0), reset()), 150);
+    window.addEventListener("dragover", over);
+    window.addEventListener("drop", drop);
+    window.addEventListener("dragend", reset);
+    window.addEventListener("blur", reset);
+    return () => {
+      clearInterval(watchdog);
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("drop", drop);
+      window.removeEventListener("dragend", reset);
+      window.removeEventListener("blur", reset);
+    };
+  }, []);
+
   const openCitation = useCallback((c: Citation) => setCitation(c), []);
   const closeCitation = useCallback(() => setCitation(null), []);
 
@@ -260,26 +299,10 @@ export function QorgauApp({ user, authEnabled }: { user: SignedInUser | null; au
     </motion.div>
   );
 
-  function onDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragging(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f && ACCEPT.split(",").includes(f.type)) attach(f);
-  }
 
   return (
     <MotionConfig reducedMotion="user">
-      <div
-        className="min-h-dvh"
-        onDragOver={(e) => {
-          if (e.dataTransfer.types.includes("Files")) {
-            e.preventDefault();
-            setDragging(true);
-          }
-        }}
-        onDragLeave={(e) => e.currentTarget === e.target && setDragging(false)}
-        onDrop={onDrop}
-      >
+      <div className="min-h-dvh">
         {/* Shared by both tabs, so switching tabs never blinks it out. Full on
             the start screen, quieter behind content so it never competes with
             an answer or the search results. */}
@@ -424,13 +447,16 @@ export function QorgauApp({ user, authEnabled }: { user: SignedInUser | null; au
         <AnimatePresence>
           {dragging && (
             <motion.div
-              className="pointer-events-none fixed inset-3 z-40 grid place-items-center rounded-[2rem] border-2 border-dashed border-accent-ink bg-accent-soft"
+              className="pointer-events-none fixed inset-3 z-40 grid place-items-center rounded-[2rem] border-2 border-dashed border-accent-ink bg-bg/90 backdrop-blur-sm"
               initial={{ opacity: 0, scale: 0.98 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.98 }}
               transition={springSnappy}
             >
-              <p className="t-title text-accent-ink">Отпустите, чтобы загрузить договор</p>
+              <div className="text-center">
+                <p className="t-title text-accent-ink">Отпустите, чтобы загрузить договор</p>
+                <p className="t-caption mt-1 text-text-2">PDF, JPG или PNG до 10 МБ</p>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -626,14 +652,44 @@ type HeaderProps = {
   me: Me | null;
 };
 
+// At the top of the page the header is flat and lines up with the content;
+// once the thread scrolls it shrinks into a floating glass capsule (the
+// "resizable navbar" pattern), and the active tab carries a gold lamp that
+// glides between tabs (the "tubelight" pattern).
 function Header({ tab, onTab, online, onNewChat, user, me }: HeaderProps) {
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "assistant", label: "Помощник" },
-    { id: "search", label: "Поиск A/B" },
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 12);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    {
+      id: "assistant",
+      label: "Помощник",
+      icon: <path d="M2.5 3.5a1 1 0 011-1h9a1 1 0 011 1v6.5a1 1 0 01-1 1H7l-3 2.5v-2.5h-.5a1 1 0 01-1-1z" />,
+    },
+    {
+      id: "search",
+      label: "Поиск A/B",
+      icon: <path d="M7 12.5a5.5 5.5 0 100-11 5.5 5.5 0 000 11zM11 11l3.5 3.5" />,
+    },
   ];
   return (
-    <header className="material sticky top-0 z-30">
-      <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4 sm:px-6">
+    <header className="pointer-events-none sticky top-0 z-30 px-2 pt-2 sm:px-4">
+      <motion.div
+        initial={false}
+        animate={
+          scrolled
+            ? { maxWidth: 680, height: 52, paddingLeft: 10, paddingRight: 10 }
+            : { maxWidth: 768, height: 52, paddingLeft: 16, paddingRight: 16 }
+        }
+        transition={spring}
+        className={`pointer-events-auto mx-auto flex items-center gap-3 rounded-full border transition-[background-color,border-color,box-shadow,backdrop-filter] duration-300 ${
+          scrolled ? "material-thick border-hairline" : "border-transparent"
+        }`}
+      >
         <div className="flex items-center gap-2">
           <Logo size={30} />
           {/* On the narrowest phones the emblem alone leaves room for the tabs
@@ -642,63 +698,94 @@ function Header({ tab, onTab, online, onNewChat, user, me }: HeaderProps) {
             Qorgau<span className="text-gold-ink">AI</span>
           </span>
         </div>
-        <nav className="mx-auto flex rounded-full bg-surface-2 p-0.5" aria-label="Разделы">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => onTab(t.id)}
-              aria-current={tab === t.id ? "page" : undefined}
-              className="pressable t-caption relative rounded-full px-3 py-1.5 font-medium whitespace-nowrap sm:px-3.5"
-            >
-              {tab === t.id && (
-                <motion.span
-                  layoutId="segment"
-                  className="absolute inset-0 rounded-full bg-surface shadow-[var(--shadow-sm)]"
-                  transition={springSnappy}
-                />
-              )}
-              <span className={`relative ${tab === t.id ? "text-text" : "text-text-2"}`}>{t.label}</span>
-            </button>
-          ))}
+        <nav className="mx-auto flex gap-0.5 rounded-full border border-hairline bg-surface-2/70 p-1" aria-label="Разделы">
+          {tabs.map((t) => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => onTab(t.id)}
+                aria-current={active ? "page" : undefined}
+                aria-label={t.label}
+                className={`pressable t-caption relative rounded-full px-3 py-1.5 font-semibold whitespace-nowrap transition-colors sm:px-4 ${
+                  active ? "text-text" : "text-text-2 hover:text-text"
+                }`}
+              >
+                {active && (
+                  <motion.span
+                    layoutId="tubelight"
+                    className="absolute inset-0 rounded-full bg-surface shadow-[var(--shadow-sm)]"
+                    transition={spring}
+                  >
+                    <span className="absolute -top-1 left-1/2 h-1 w-8 -translate-x-1/2 rounded-t-full bg-gold" aria-hidden>
+                      <span className="absolute -top-2 -left-2 h-6 w-12 rounded-full bg-gold/25 blur-md" />
+                      <span className="absolute -top-1 h-6 w-8 rounded-full bg-gold/25 blur-md" />
+                      <span className="absolute top-0 left-2 size-4 rounded-full bg-gold/25 blur-sm" />
+                    </span>
+                  </motion.span>
+                )}
+                <span className="relative flex items-center gap-1.5">
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="sm:hidden"
+                    aria-hidden
+                  >
+                    {t.icon}
+                  </svg>
+                  <span className="hidden sm:inline">{t.label}</span>
+                </span>
+              </button>
+            );
+          })}
         </nav>
-        <AnimatePresence initial={false}>
-          {onNewChat && (
-            <motion.button
-              onClick={() => {
-                onTab("assistant");
-                onNewChat();
-              }}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={springSnappy}
-              className="pressable t-caption inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1.5 font-medium text-text hover:bg-accent-soft hover:text-accent-ink"
-              aria-label="Новый чат"
-              title="Начать новый чат"
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
-                <path d="M6 1.5v9M1.5 6h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
-              <span className="hidden sm:inline">Новый чат</span>
-            </motion.button>
-          )}
-        </AnimatePresence>
-        <span
-          className={`t-caption hidden items-center gap-1.5 text-text-2 ${user ? "lg:flex" : "sm:flex"}`}
-          title="Состояние бэкенда и Qdrant"
-        >
+        <div className="flex items-center gap-2.5">
+          <AnimatePresence initial={false}>
+            {onNewChat && (
+              <motion.button
+                onClick={() => {
+                  onTab("assistant");
+                  onNewChat();
+                }}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={springSnappy}
+                className="pressable t-caption inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1.5 font-medium text-text hover:bg-accent-soft hover:text-accent-ink"
+                aria-label="Новый чат"
+                title="Начать новый чат"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
+                  <path d="M6 1.5v9M1.5 6h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+                <span className="hidden sm:inline">Новый чат</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
           <span
-            className={`size-2 rounded-full ${online === null ? "bg-text-3" : online ? "bg-green" : "bg-red"}`}
-            aria-hidden
-          />
-          {online === null ? "Подключение…" : online ? "База подключена" : "Бэкенд недоступен"}
-        </span>
+            className="grid size-5 shrink-0 place-items-center"
+            title={online === null ? "Подключение…" : online ? "База подключена" : "Бэкенд недоступен"}
+            role="status"
+            aria-label={online === null ? "Подключение…" : online ? "База подключена" : "Бэкенд недоступен"}
+          >
+            <span className="relative flex size-2">
+              {online && <span className="absolute inset-0 animate-ping rounded-full bg-green opacity-60 motion-reduce:animate-none" />}
+              <span className={`relative size-2 rounded-full ${online === null ? "bg-text-3" : online ? "bg-green" : "bg-red"}`} />
+            </span>
+          </span>
+          <ThemeToggle />
         {user && <UserMenu user={user} me={me} />}
-      </div>
+        </div>
+      </motion.div>
     </header>
   );
 }
-
 function UserMenu({ user, me }: { user: SignedInUser; me: Me | null }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);

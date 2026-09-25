@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* The theme lives on <html data-theme>: an inline script in the layout sets it
+   before the first paint from the saved choice, or from the system setting
+   when there is none. The toggle in the header changes it. */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
 /* ---------------------------------------------------------------- tokens */
 
 /* Brand palette from the logo: deep navy (#002a50) carries structure and
@@ -33,32 +38,30 @@
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #040a14;
-    --surface: #0e1829;
-    --surface-2: #19253a;
-    --text: #eef2f8;
-    --text-2: #9ba8bd;
-    --text-3: #7c889d;
-    --hairline: rgba(238, 242, 248, 0.1);
-    --accent: #2c67aa;
-    --accent-ink: #8fbcec;
-    --accent-soft: rgba(110, 165, 230, 0.16);
-    --gold: #f0b430;
-    --gold-ink: #f3c25a;
-    --gold-soft: rgba(240, 180, 48, 0.16);
-    --green: #3ad26a;
-    --green-soft: rgba(48, 209, 88, 0.15);
-    --red: #ff5a50;
-    --red-soft: rgba(255, 69, 58, 0.15);
-    --material: rgba(10, 18, 32, 0.72);
-    --material-edge: rgba(255, 255, 255, 0.07);
-    --scrim: rgba(0, 3, 10, 0.55);
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.65);
-    color-scheme: dark;
-  }
+:root[data-theme="dark"] {
+  --bg: #040a14;
+  --surface: #0e1829;
+  --surface-2: #19253a;
+  --text: #eef2f8;
+  --text-2: #9ba8bd;
+  --text-3: #7c889d;
+  --hairline: rgba(238, 242, 248, 0.1);
+  --accent: #2c67aa;
+  --accent-ink: #8fbcec;
+  --accent-soft: rgba(110, 165, 230, 0.16);
+  --gold: #f0b430;
+  --gold-ink: #f3c25a;
+  --gold-soft: rgba(240, 180, 48, 0.16);
+  --green: #3ad26a;
+  --green-soft: rgba(48, 209, 88, 0.15);
+  --red: #ff5a50;
+  --red-soft: rgba(255, 69, 58, 0.15);
+  --material: rgba(10, 18, 32, 0.72);
+  --material-edge: rgba(255, 255, 255, 0.07);
+  --scrim: rgba(0, 3, 10, 0.55);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.65);
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -192,16 +195,16 @@ body {
   }
 }
 
-@media (prefers-contrast: more) and (prefers-color-scheme: light) {
-  :root {
+@media (prefers-contrast: more) {
+  :root:not([data-theme="dark"]) {
     --hairline: rgba(13, 26, 43, 0.45);
     --text-2: #2f3a4d;
     --accent-ink: #0a3a6e;
     --gold-ink: #6b4600;
   }
 }
-@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
-  :root {
+@media (prefers-contrast: more) {
+  :root[data-theme="dark"] {
     --hairline: rgba(238, 242, 248, 0.45);
     --text-2: #c9d2e0;
     --accent-ink: #b3d3f5;
@@ -276,10 +279,8 @@ body {
   animation: aurora 60s linear infinite;
   mix-blend-mode: soft-light;
 }
-@media (prefers-color-scheme: dark) {
-  .aurora {
-    opacity: 0.4;
-  }
+:root[data-theme="dark"] .aurora {
+  opacity: 0.4;
 }
 @keyframes aurora {
   from {
