@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from langfuse import propagate_attributes
 
@@ -20,7 +21,9 @@ from app.api.schemas import (
     AskResponse,
     DocumentResponse,
     FeedbackRequest,
-    HistoryPayload,
+    ChatPayload,
+    ChatResponse,
+    ChatSummary,
     MeResponse,
     PageInfo,
     HealthResponse,
@@ -251,14 +254,29 @@ def feedback(req: FeedbackRequest, user: User = Depends(current_user)) -> None:
     )
 
 
-@router.get("/history", response_model=HistoryPayload)
-def get_history(user: User = Depends(current_user)) -> HistoryPayload:
-    return HistoryPayload(chat=accounts.load_chat(user))
+# The client makes chat ids up (its web session id), so they are checked for
+# shape; ownership is checked in the service.
+ChatId = Annotated[str, Path(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")]
 
 
-@router.put("/history", status_code=204)
-def put_history(payload: HistoryPayload, user: User = Depends(current_user)) -> None:
-    accounts.save_chat(user, payload.chat)
+@router.get("/chats", response_model=list[ChatSummary])
+def get_chats(user: User = Depends(current_user)) -> list[dict]:
+    return accounts.list_chats(user)
+
+
+@router.get("/chats/{chat_id}", response_model=ChatResponse)
+def get_chat(chat_id: ChatId, user: User = Depends(current_user)) -> dict:
+    return accounts.load_chat(user, chat_id)
+
+
+@router.put("/chats/{chat_id}", status_code=204)
+def put_chat(chat_id: ChatId, payload: ChatPayload, user: User = Depends(current_user)) -> None:
+    accounts.save_chat(user, chat_id, payload.title, payload.chat)
+
+
+@router.delete("/chats/{chat_id}", status_code=204)
+def remove_chat(chat_id: ChatId, user: User = Depends(current_user)) -> None:
+    accounts.delete_chat(user, chat_id)
 
 
 @router.get("/admin/stats")

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 from app.agents.schemas import FinalAnswer
@@ -108,8 +110,19 @@ class FeedbackRequest(BaseModel):
     comment: str | None = Field(None, max_length=1000)
 
 
-class HistoryPayload(BaseModel):
-    chat: dict | None = Field(description="The current conversation as the web app stores it; null clears it.")
+class ChatSummary(BaseModel):
+    id: str
+    title: str
+    updated_at: datetime
+
+
+class ChatPayload(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    chat: dict = Field(description="The conversation as the web app stores it.")
+
+
+class ChatResponse(ChatPayload):
+    id: str
 
 
 class MeResponse(BaseModel):

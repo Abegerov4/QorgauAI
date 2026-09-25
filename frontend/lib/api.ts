@@ -35,6 +35,9 @@ export type AskResponse = {
 
 export type Me = { email: string; name: string | null; role: "user" | "admin"; questions_today: number; daily_limit: number | null };
 
+/** A saved conversation in the sidebar; updated_at is UTC without a zone. */
+export type ChatSummary = { id: string; title: string; updated_at: string };
+
 export type AdminStats = {
   today: { spent_usd: number; budget_usd: number; per_user_limit: number; users: { email: string; questions: number; cost_usd: number }[] };
   week: { questions: number; cost_usd: number; active_users: number; helpful: number; not_helpful: number };
@@ -212,7 +215,10 @@ export const api = {
   me: () => request<Me>("/me"),
   feedback: (traceId: string, helpful: boolean, comment?: string) =>
     request<void>("/feedback", json({ trace_id: traceId, helpful, comment: comment || undefined })),
-  history: <T>() => request<{ chat: T | null }>("/history"),
-  saveHistory: (chat: unknown) => request<void>("/history", { ...json({ chat }), method: "PUT" }),
+  chats: () => request<ChatSummary[]>("/chats"),
+  chat: <T>(id: string) => request<{ id: string; title: string; chat: T }>(`/chats/${encodeURIComponent(id)}`),
+  saveChat: (id: string, title: string, chat: unknown) =>
+    request<void>(`/chats/${encodeURIComponent(id)}`, { ...json({ title, chat }), method: "PUT" }),
+  deleteChat: (id: string) => request<void>(`/chats/${encodeURIComponent(id)}`, { method: "DELETE" }),
   adminStats: () => request<AdminStats>("/admin/stats"),
 };

@@ -7,7 +7,7 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 
-from app.accounts import config, service
+from app.accounts import config, db, service
 from app.accounts.auth import User
 from app.main import app
 
@@ -100,19 +100,50 @@ def test_admin_stats_is_admin_only(monkeypatch):
     assert client.get("/admin/stats", headers=token(USER.email)).status_code == 403
 
 
-def test_history_round_trip_and_limits(monkeypatch):
+def test_chats_round_trip_list_and_delete(monkeypatch):
     monkeypatch.setattr(config, "AUTH_REQUIRED", True)
     headers = token(USER.email)
-    assert client.get("/history", headers=headers).json() == {"chat": None}
+    assert client.get("/chats", headers=headers).json() == []
     chat = {"sessionId": "web-1", "items": [{"id": "1", "kind": "question", "text": "вопрос"}], "clauses": []}
-    assert client.put("/history", json={"chat": chat}, headers=headers).status_code == 204
-    assert client.get("/history", headers=headers).json()["chat"] == chat
-    assert client.get("/history", headers=token("admin@example.com")).json()["chat"] is None  # per user
-    assert client.put("/history", json={"chat": None}, headers=headers).status_code == 204
-    assert client.get("/history", headers=headers).json()["chat"] is None
+    assert client.put("/chats/web-1", json={"title": "вопрос", "chat": chat}, headers=headers).status_code == 204
+    assert client.put("/chats/web-2", json={"title": "второй", "chat": chat}, headers=headers).status_code == 204
+    assert [c["title"] for c in client.get("/chats", headers=headers).json()] == ["второй", "вопрос"]  # newest first
+    assert client.put("/chats/web-1", json={"title": "вопрос", "chat": chat}, headers=headers).status_code == 204
+    assert [c["id"] for c in client.get("/chats", headers=headers).json()] == ["web-1", "web-2"]  # saving bumps it
+    assert client.get("/chats/web-1", headers=headers).json() == {"id": "web-1", "title": "вопрос", "chat": chat}
+    assert client.delete("/chats/web-2", headers=headers).status_code == 204
+    assert [c["id"] for c in client.get("/chats", headers=headers).json()] == ["web-1"]
+    assert client.get("/chats/web-2", headers=headers).status_code == 404
+
+
+def test_chats_are_private_and_limited(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_REQUIRED", True)
+    chat = {"sessionId": "web-1", "items": [], "clauses": []}
+    client.put("/chats/web-1", json={"title": "мой", "chat": chat}, headers=token(USER.email))
+    other = token("admin@example.com")
+    assert client.get("/chats", headers=other).json() == []
+    assert client.get("/chats/web-1", headers=other).status_code == 404
+    assert client.put("/chats/web-1", json={"title": "чужой", "chat": chat}, headers=other).status_code == 404
+    client.delete("/chats/web-1", headers=other)  # a no-op for someone else's chat
+    assert client.get("/chats/web-1", headers=token(USER.email)).json()["title"] == "мой"
+    assert client.get("/chats/bad%20id", headers=other).status_code == 422
     monkeypatch.setattr(config, "MAX_HISTORY_BYTES", 100)
-    big = {**chat, "items": chat["items"] * 10}
-    assert client.put("/history", json={"chat": big}, headers=headers).status_code == 413
+    big = {**chat, "items": [{"text": "x" * 200}]}
+    assert client.put("/chats/web-3", json={"title": "big", "chat": big}, headers=other).status_code == 413
+
+
+def test_legacy_single_chat_moves_into_conversations(tmp_path):
+    from sqlalchemy import create_engine, inspect
+
+    url = f"sqlite:///{tmp_path / 'legacy.db'}"
+    with create_engine(url).begin() as conn:
+        db.legacy_chats.create(conn)
+        chat = {"sessionId": "web-old", "items": [{"id": "1", "kind": "question", "text": "Старый вопрос"}], "clauses": []}
+        conn.execute(db.legacy_chats.insert().values(user_email=USER.email, items=chat, updated_at=db.now()))
+    db.reset_engine(url)  # runs init_db and the migration
+    assert not inspect(db.engine()).has_table("chats")
+    assert service.list_chats(USER)[0]["title"] == "Старый вопрос"
+    assert service.load_chat(USER, "web-old")["chat"] == chat
 
 
 def test_quota_blocks_the_agent_before_it_runs(monkeypatch):

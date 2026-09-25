@@ -18,6 +18,8 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     func,
+    inspect,
+    select,
 )
 from sqlalchemy.engine import Engine
 
@@ -60,10 +62,24 @@ feedback = Table(
     UniqueConstraint("user_email", "trace_id"),  # a second click changes the vote
 )
 
-# The current conversation per user, as the web app renders it.
-chats = Table(
-    "chats",
+# A user's conversations, as the web app renders them. The id is the web
+# session id the client made up for the chat.
+conversations = Table(
+    "conversations",
     metadata,
+    Column("id", String(64), primary_key=True),
+    Column("user_email", String(320), nullable=False, index=True),
+    Column("title", String(200), nullable=False),
+    Column("items", JSON, nullable=False),
+    Column("created_at", DateTime(), nullable=False),
+    Column("updated_at", DateTime(), nullable=False, index=True),
+)
+
+# Before conversations: one current chat per user. Only read once, to carry
+# those chats over, then dropped.
+legacy_chats = Table(
+    "chats",
+    MetaData(),
     Column("user_email", String(320), primary_key=True),
     Column("items", JSON, nullable=False),
     Column("updated_at", DateTime(), nullable=False),
@@ -85,6 +101,31 @@ def init_db() -> None:
 
         Path(config.DATABASE_URL.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     metadata.create_all(engine())
+    _migrate_legacy_chats()
+
+
+def _migrate_legacy_chats() -> None:
+    with engine().begin() as conn:
+        if not inspect(conn).has_table("chats"):
+            return
+        legacy = select(legacy_chats.c.user_email, legacy_chats.c["items"], legacy_chats.c.updated_at)
+        for email, chat, updated in conn.execute(legacy).all():
+            chat = dict(chat)
+            items = chat.get("items") or []
+            first = next((i.get("text") for i in items if i.get("kind") == "question"), None)
+            chat_id = str(chat.get("sessionId") or f"web-legacy-{email}")[:64]
+            if items and not conn.execute(conversations.select().where(conversations.c.id == chat_id)).first():
+                conn.execute(
+                    conversations.insert().values(
+                        id=chat_id,
+                        user_email=email,
+                        title=(first or "Чат")[:80],
+                        items=chat,
+                        created_at=updated,
+                        updated_at=updated,
+                    )
+                )
+        legacy_chats.drop(conn)
 
 
 def reset_engine(url: str) -> None:
@@ -106,4 +147,4 @@ def start_of_day() -> datetime:
     return n.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-__all__ = ["chats", "engine", "feedback", "func", "init_db", "now", "questions", "start_of_day", "users"]
+__all__ = ["conversations", "engine", "feedback", "func", "init_db", "now", "questions", "start_of_day", "users"]

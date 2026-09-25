@@ -1,23 +1,22 @@
 "use client";
 
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "motion/react";
-import Image from "next/image";
-import Link from "next/link";
+import { Bars3Icon, PlusIcon } from "@heroicons/react/20/solid";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { signOutAction } from "@/app/actions";
-import { api, type AgentEvent, type AskResponse, type Clause, type DocumentResponse, type Me } from "@/lib/api";
+import { api, type AgentEvent, type AskResponse, type ChatSummary, type Clause, type DocumentResponse, type Me } from "@/lib/api";
 import type { Citation } from "@/lib/citations";
-import { clearChat, loadChat, saveChat, type SavedChat } from "@/lib/history";
+import { chatTitle, openChatId, rememberOpenChat, type SavedChat } from "@/lib/history";
 import { spring, springSnappy } from "@/lib/motion";
 import type { Trace } from "./AgentSteps";
 import { AnswerCard } from "./AnswerCard";
 import { CitationView } from "./CitationView";
 import { ACCEPT, Composer } from "./Composer";
 import { DocumentCard } from "./DocumentCard";
+import { Logo, Wordmark } from "./Logo";
 import { SearchCompare } from "./SearchCompare";
 import { Sheet } from "./Sheet";
+import { Sidebar, type SignedInUser } from "./Sidebar";
 import { Thinking } from "./Thinking";
-import { ThemeToggle } from "./ThemeToggle";
 import { WordRotate } from "./WordRotate";
 
 type Item =
@@ -86,9 +85,7 @@ function applyEvent(t: Trace, e: AgentEvent): Trace {
   return { ...t, verified: [...t.verified.slice(0, -1), { checked: e.checked, supported: e.supported }] };
 }
 
-export type SignedInUser = { name: string | null; email: string; image: string | null };
-
-export function QorgauApp({ user, authEnabled }: { user: SignedInUser | null; authEnabled: boolean }) {
+export function QorgauApp({ user }: { user: SignedInUser | null }) {
   const [tab, setTab] = useState<Tab>("assistant");
   const [items, setItems] = useState<Item[]>([]);
   const [draft, setDraft] = useState("");
@@ -99,39 +96,49 @@ export function QorgauApp({ user, authEnabled }: { user: SignedInUser | null; au
   const [dragging, setDragging] = useState(false);
   const sessionId = useRef<string>("");
   const abort = useRef<AbortController | null>(null);
-  const restored = useRef(false);
   const [me, setMe] = useState<Me | null>(null);
+  const [chats, setChats] = useState<ChatSummary[] | null>(null);
+  const [activeId, setActiveId] = useState("");
+  const [drawer, setDrawer] = useState(false); // history drawer on phones
+  const [sidebarHidden, setSidebarHidden] = useState(false); // laptops
+  // The items as last loaded or saved: no need to save them again.
+  const saved = useRef<Item[] | null>(null);
+  const pendingSave = useRef<(() => void) | null>(null);
   const [away, setAway] = useState(false); // scrolled up from the latest message
   const reduced = useReducedMotion();
 
   const busy = items.some((i) => i.kind === "pending");
 
+  const showChat = useCallback((id: string, chat: SavedChat<Item> | null) => {
+    const restoredItems = chat?.items?.length ? restoreItems(chat.items) : [];
+    sessionId.current = id;
+    saved.current = restoredItems;
+    setActiveId(id);
+    setItems(restoredItems);
+    setClauses(chat?.clauses ?? []);
+    rememberOpenChat(restoredItems.length ? id : null);
+  }, []);
+
   useEffect(() => {
-    // Signed in: the conversation lives on the server, on any device. Open
-    // local mode: in this tab's sessionStorage. Either way it is read after
-    // the first render (the server-rendered page is always the empty chat).
-    const apply = (saved: SavedChat<Item> | null) => {
-      sessionId.current = saved?.sessionId ?? `web-${uid()}`;
-      if (saved?.items?.length) {
-        setItems(restoreItems(saved.items));
-        setClauses(saved.clauses ?? []);
-      }
-      restored.current = true;
-    };
-    if (authEnabled) {
-      api
-        .history<SavedChat<Item>>()
-        .then((r) => apply(r.chat))
-        .catch(() => apply(null));
-    } else {
-      apply(loadChat<Item>());
-    }
+    // The chat list comes from the server; a reload reopens the chat that was
+    // open in this tab. The server-rendered page is always an empty new chat.
+    sessionId.current = `web-${uid()}`;
+    api
+      .chats()
+      .then((list) => {
+        setChats(list);
+        const open = openChatId();
+        if (open && list.some((c) => c.id === open)) {
+          return api.chat<SavedChat<Item>>(open).then((r) => showChat(open, r.chat));
+        }
+      })
+      .catch(() => setChats((c) => c ?? []));
     api.me().then(setMe).catch(() => setMe(null));
     api
       .health()
       .then((h) => setOnline(h.qdrant_connected && h.collection_exists))
       .catch(() => setOnline(false));
-  }, [authEnabled]);
+  }, [showChat]);
 
   // To the very end of the page: main's bottom padding is what lifts the last
   // message above the fixed composer bar, so scrolling to the thread's last
@@ -145,18 +152,32 @@ export function QorgauApp({ user, authEnabled }: { user: SignedInUser | null; au
     if (items.length) scrollToEnd();
   }, [items, scrollToEnd]);
 
+  // Save the open chat once live progress settles (it changes items many
+  // times a second). Switching chats saves at once instead of waiting.
+  const flushSave = useCallback(() => {
+    const save = pendingSave.current;
+    pendingSave.current = null;
+    save?.();
+  }, []);
+
   useEffect(() => {
-    if (!restored.current) return; // do not overwrite the history before it is read
-    const chat = items.length ? { sessionId: sessionId.current, items, clauses } : null;
-    if (!authEnabled) {
-      if (chat) saveChat(chat);
-      else clearChat();
-      return;
-    }
-    // Live progress changes items many times a second; save once it settles.
-    const t = setTimeout(() => api.saveHistory(chat).catch(() => {}), 800);
+    if (!items.length || items === saved.current) return;
+    const id = sessionId.current;
+    const title = chatTitle(items);
+    const chat = { sessionId: id, items, clauses };
+    pendingSave.current = () => {
+      saved.current = items;
+      rememberOpenChat(id);
+      api
+        .saveChat(id, title, chat)
+        .then(() =>
+          setChats((cs) => [{ id, title, updated_at: new Date().toISOString() }, ...(cs ?? []).filter((c) => c.id !== id)]),
+        )
+        .catch(() => {});
+    };
+    const t = setTimeout(flushSave, 800);
     return () => clearTimeout(t);
-  }, [items, clauses, authEnabled]);
+  }, [items, clauses, flushSave]);
 
   // "Back to the latest message" appears once the reader scrolls well up.
   useEffect(() => {
@@ -171,14 +192,40 @@ export function QorgauApp({ user, authEnabled }: { user: SignedInUser | null; au
   }, [items]);
 
   function newChat() {
+    flushSave();
     abort.current?.abort();
-    setItems([]);
-    setClauses([]);
+    showChat(`web-${uid()}`, null);
     setAttachment(null);
     setDraft("");
     setCitation(null);
-    sessionId.current = `web-${uid()}`;
+    setTab("assistant");
     window.scrollTo({ top: 0 });
+  }
+
+  async function openChat(id: string) {
+    setTab("assistant");
+    if (id === sessionId.current) return;
+    flushSave();
+    abort.current?.abort();
+    setAttachment(null);
+    setCitation(null);
+    try {
+      const r = await api.chat<SavedChat<Item>>(id);
+      showChat(id, r.chat);
+      window.scrollTo({ top: 0 });
+    } catch {
+      setChats((cs) => (cs ?? []).filter((c) => c.id !== id)); // gone on the server
+    }
+  }
+
+  async function deleteChat(id: string) {
+    setChats((cs) => (cs ?? []).filter((c) => c.id !== id));
+    if (id === sessionId.current) {
+      pendingSave.current = null; // do not bring it back
+      abort.current?.abort();
+      showChat(`web-${uid()}`, null);
+    }
+    await api.deleteChat(id).catch(() => {});
   }
 
   const rate = useCallback(async (itemId: string, traceId: string, helpful: boolean, comment?: string) => {
@@ -259,6 +306,12 @@ export function QorgauApp({ user, authEnabled }: { user: SignedInUser | null; au
     const startedAt = Date.now();
     const docId = attachment?.id;
     setDraft("");
+    if (!items.length || !chats?.some((c) => c.id === sessionId.current)) {
+      const id = sessionId.current;
+      const title = chatTitle([...items, { kind: "question", text: question }]);
+      setActiveId(id);
+      setChats((cs) => [{ id, title, updated_at: new Date().toISOString() }, ...(cs ?? []).filter((c) => c.id !== id)]);
+    }
     setItems((xs) => [
       ...xs,
       { id: uid(), kind: "question", text: question, withDocument: docId ? attachment!.name : null },
@@ -302,7 +355,20 @@ export function QorgauApp({ user, authEnabled }: { user: SignedInUser | null; au
 
   return (
     <MotionConfig reducedMotion="user">
-      <div className="min-h-dvh">
+      <Sidebar
+        chats={chats}
+        activeId={items.length ? activeId : ""}
+        onSelect={openChat}
+        onNew={newChat}
+        onDelete={deleteChat}
+        user={user}
+        me={me}
+        open={drawer}
+        onClose={() => setDrawer(false)}
+        hidden={sidebarHidden}
+        onHide={() => setSidebarHidden(true)}
+      />
+      <div className={`min-h-dvh transition-[padding] duration-300 ${sidebarHidden ? "" : "lg:pl-72"}`}>
         {/* Shared by both tabs, so switching tabs never blinks it out. Full on
             the start screen, quieter behind content so it never competes with
             an answer or the search results. */}
@@ -316,7 +382,15 @@ export function QorgauApp({ user, authEnabled }: { user: SignedInUser | null; au
           <div className="aurora" />
         </motion.div>
 
-        <Header tab={tab} onTab={setTab} online={online} onNewChat={items.length > 0 ? newChat : undefined} user={user} me={me} />
+        <Header
+          tab={tab}
+          onTab={setTab}
+          online={online}
+          onNewChat={items.length > 0 ? newChat : undefined}
+          onMenu={() => setDrawer(true)}
+          sidebarHidden={sidebarHidden}
+          onShowSidebar={() => setSidebarHidden(false)}
+        />
 
         <main className={`mx-auto w-full max-w-3xl px-4 pt-8 sm:px-6 ${hero ? "pb-8" : "pb-60"}`}>
           {/* No initial={false} here: Motion passes it down to everything mounted
@@ -404,7 +478,9 @@ export function QorgauApp({ user, authEnabled }: { user: SignedInUser | null; au
         </main>
 
         {tab === "assistant" && !hero && (
-          <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30">
+          <div
+            className={`pointer-events-none fixed inset-x-0 bottom-0 z-30 transition-[left] duration-300 ${sidebarHidden ? "" : "lg:left-72"}`}
+          >
             <div className="absolute inset-x-0 -top-4 flex justify-center">
               <AnimatePresence>
                 {away && (
@@ -648,15 +724,18 @@ type HeaderProps = {
   onTab: (t: Tab) => void;
   online: boolean | null;
   onNewChat?: () => void;
-  user: SignedInUser | null;
-  me: Me | null;
+  onMenu: () => void;
+  sidebarHidden: boolean;
+  onShowSidebar: () => void;
 };
 
 // At the top of the page the header is flat and lines up with the content;
 // once the thread scrolls it shrinks into a floating glass capsule (the
 // "resizable navbar" pattern), and the active tab carries a gold lamp that
-// glides between tabs (the "tubelight" pattern).
-function Header({ tab, onTab, online, onNewChat, user, me }: HeaderProps) {
+// glides between tabs (the "tubelight" pattern). The brand, new chat and the
+// account live in the sidebar; on phones (or with the sidebar hidden) the
+// header brings back the menu button, the emblem and "new chat".
+function Header({ tab, onTab, online, onNewChat, onMenu, sidebarHidden, onShowSidebar }: HeaderProps) {
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
@@ -664,41 +743,47 @@ function Header({ tab, onTab, online, onNewChat, user, me }: HeaderProps) {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+  // Shown on phones always, on laptops only while the sidebar is hidden.
+  const compact = sidebarHidden ? "" : "lg:hidden";
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     {
       id: "assistant",
       label: "Помощник",
       icon: <path d="M2.5 3.5a1 1 0 011-1h9a1 1 0 011 1v6.5a1 1 0 01-1 1H7l-3 2.5v-2.5h-.5a1 1 0 01-1-1z" />,
     },
-    {
-      id: "search",
-      label: "Поиск A/B",
-      icon: <path d="M7 12.5a5.5 5.5 0 100-11 5.5 5.5 0 000 11zM11 11l3.5 3.5" />,
-    },
+    { id: "search", label: "Поиск A/B", icon: <path d="M7 12.5a5.5 5.5 0 100-11 5.5 5.5 0 000 11zM11 11l3.5 3.5" /> },
   ];
+  const status = online === null ? "Подключение…" : online ? "База подключена" : "Бэкенд недоступен";
   return (
     <header className="pointer-events-none sticky top-0 z-30 px-2 pt-2 sm:px-4">
       <motion.div
         initial={false}
         animate={
           scrolled
-            ? { maxWidth: 680, height: 52, paddingLeft: 10, paddingRight: 10 }
-            : { maxWidth: 768, height: 52, paddingLeft: 16, paddingRight: 16 }
+            ? { maxWidth: 680, height: 52, paddingLeft: 8, paddingRight: 10 }
+            : { maxWidth: 768, height: 52, paddingLeft: 12, paddingRight: 16 }
         }
         transition={spring}
-        className={`pointer-events-auto mx-auto flex items-center gap-3 rounded-full border transition-[background-color,border-color,box-shadow,backdrop-filter] duration-300 ${
+        className={`pointer-events-auto mx-auto flex items-center gap-2 rounded-full border transition-[background-color,border-color,box-shadow,backdrop-filter] duration-300 ${
           scrolled ? "material-thick border-hairline" : "border-transparent"
         }`}
       >
-        <div className="flex items-center gap-2">
-          <Logo size={30} />
-          {/* On the narrowest phones the emblem alone leaves room for the tabs
-              and the new-chat button; the name is still the page title. */}
-          <span className="hidden text-[1.0625rem] font-semibold tracking-[-0.01em] min-[420px]:inline">
-            Qorgau<span className="text-gold-ink">AI</span>
+        {/* Left and right clusters share flex-1 so the tabs stay centred. */}
+        <div className="flex flex-1 items-center gap-1.5">
+          <button
+            onClick={sidebarHidden ? () => (window.matchMedia("(min-width: 64rem)").matches ? onShowSidebar() : onMenu()) : onMenu}
+            className={`pressable grid size-9 place-items-center rounded-full text-text-2 hover:bg-surface-2 hover:text-text ${compact}`}
+            aria-label="История чатов"
+            title="История чатов"
+          >
+            <Bars3Icon className="size-5" />
+          </button>
+          <span className={`items-center gap-2 ${sidebarHidden ? "flex" : "flex lg:hidden"}`}>
+            <Logo size={28} />
+            <Wordmark className="hidden min-[480px]:inline" />
           </span>
         </div>
-        <nav className="mx-auto flex gap-0.5 rounded-full border border-hairline bg-surface-2/70 p-1" aria-label="Разделы">
+        <nav className="flex gap-0.5 rounded-full border border-hairline bg-surface-2/70 p-1" aria-label="Разделы">
           {tabs.map((t) => {
             const active = tab === t.id;
             return (
@@ -712,11 +797,7 @@ function Header({ tab, onTab, online, onNewChat, user, me }: HeaderProps) {
                 }`}
               >
                 {active && (
-                  <motion.span
-                    layoutId="tubelight"
-                    className="absolute inset-0 rounded-full bg-surface shadow-[var(--shadow-sm)]"
-                    transition={spring}
-                  >
+                  <motion.span layoutId="tubelight" className="absolute inset-0 rounded-full bg-surface shadow-[var(--shadow-sm)]" transition={spring}>
                     <span className="absolute -top-1 left-1/2 h-1 w-8 -translate-x-1/2 rounded-t-full bg-gold" aria-hidden>
                       <span className="absolute -top-2 -left-2 h-6 w-12 rounded-full bg-gold/25 blur-md" />
                       <span className="absolute -top-1 h-6 w-8 rounded-full bg-gold/25 blur-md" />
@@ -745,125 +826,31 @@ function Header({ tab, onTab, online, onNewChat, user, me }: HeaderProps) {
             );
           })}
         </nav>
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-1 items-center justify-end gap-2">
           <AnimatePresence initial={false}>
             {onNewChat && (
               <motion.button
-                onClick={() => {
-                  onTab("assistant");
-                  onNewChat();
-                }}
+                onClick={onNewChat}
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
                 transition={springSnappy}
-                className="pressable t-caption inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1.5 font-medium text-text hover:bg-accent-soft hover:text-accent-ink"
+                className={`pressable t-caption inline-flex items-center gap-1.5 rounded-full bg-surface-2 p-2 font-medium text-text hover:bg-accent-soft hover:text-accent-ink ${compact}`}
                 aria-label="Новый чат"
                 title="Начать новый чат"
               >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
-                  <path d="M6 1.5v9M1.5 6h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                </svg>
-                <span className="hidden sm:inline">Новый чат</span>
+                <PlusIcon className="size-4" />
               </motion.button>
             )}
           </AnimatePresence>
-          <span
-            className="grid size-5 shrink-0 place-items-center"
-            title={online === null ? "Подключение…" : online ? "База подключена" : "Бэкенд недоступен"}
-            role="status"
-            aria-label={online === null ? "Подключение…" : online ? "База подключена" : "Бэкенд недоступен"}
-          >
+          <span className="grid size-5 shrink-0 place-items-center" title={status} role="status" aria-label={status}>
             <span className="relative flex size-2">
               {online && <span className="absolute inset-0 animate-ping rounded-full bg-green opacity-60 motion-reduce:animate-none" />}
               <span className={`relative size-2 rounded-full ${online === null ? "bg-text-3" : online ? "bg-green" : "bg-red"}`} />
             </span>
           </span>
-          <ThemeToggle />
-        {user && <UserMenu user={user} me={me} />}
         </div>
       </motion.div>
     </header>
-  );
-}
-function UserMenu({ user, me }: { user: SignedInUser; me: Me | null }) {
-  const [open, setOpen] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => root.current?.contains(e.target as Node) || setOpen(false);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("pointerdown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-  const initial = (user.name || user.email).trim()[0]?.toUpperCase() ?? "?";
-
-  return (
-    <div ref={root} className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label="Меню аккаунта"
-        className="pressable grid size-8 place-items-center overflow-hidden rounded-full bg-accent-soft font-semibold text-accent-ink"
-      >
-        {user.image ? (
-          // eslint-disable-next-line @next/next/no-img-element -- a Google avatar; next/image would need its host allow-listed
-          <img src={user.image} alt="" referrerPolicy="no-referrer" className="size-full object-cover" />
-        ) : (
-          <span className="t-caption">{initial}</span>
-        )}
-      </button>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            role="menu"
-            initial={{ opacity: 0, y: -4, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.98 }}
-            transition={springSnappy}
-            className="material-thick absolute top-10 right-0 z-40 w-64 origin-top-right rounded-2xl p-2"
-          >
-            <div className="px-2.5 pt-1.5 pb-2.5">
-              <p className="t-body truncate font-semibold">{user.name ?? user.email}</p>
-              <p className="t-caption truncate text-text-2">{user.email}</p>
-              {me && (
-                <p className="t-caption mt-1.5 text-text-3">
-                  {me.daily_limit === null
-                    ? `Администратор · сегодня вопросов: ${me.questions_today}`
-                    : `Сегодня осталось ${Math.max(0, me.daily_limit - me.questions_today)} из ${me.daily_limit} вопросов`}
-                </p>
-              )}
-            </div>
-            <div className="border-t border-hairline pt-1.5">
-              {me?.role === "admin" && (
-                <Link href="/admin" role="menuitem" className="t-body block rounded-xl px-2.5 py-2 hover:bg-surface-2">
-                  Статистика
-                </Link>
-              )}
-              <form action={signOutAction}>
-                <button type="submit" role="menuitem" className="t-body w-full rounded-xl px-2.5 py-2 text-left text-red hover:bg-red-soft">
-                  Выйти
-                </button>
-              </form>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-// The emblem is navy and gold on transparent; in dark mode it sits on a light
-// disc so the navy keeps its contrast.
-function Logo({ size }: { size: number }) {
-  return (
-    <span className="grid shrink-0 place-items-center rounded-full dark:bg-white/95" style={{ width: size, height: size }}>
-      <Image src="/logo-mark.png" alt="" width={size} height={size} priority className="dark:scale-[0.84]" />
-    </span>
   );
 }

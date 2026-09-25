@@ -75,22 +75,46 @@ def save_feedback(user: User, trace_id: str, value: int, comment: str | None) ->
         )
 
 
-def load_chat(user: User) -> dict | None:
+def list_chats(user: User, limit: int = 100) -> list[dict]:
+    c = db.conversations.c
     with db.engine().connect() as conn:
-        row = conn.execute(select(db.chats.c["items"]).where(db.chats.c.user_email == user.email)).first()
-    return dict(row[0]) if row else None
+        rows = conn.execute(
+            select(c.id, c.title, c.updated_at).where(c.user_email == user.email).order_by(c.updated_at.desc()).limit(limit)
+        ).all()
+    return [{"id": r.id, "title": r.title, "updated_at": r.updated_at} for r in rows]
 
 
-def save_chat(user: User, chat: dict | None) -> None:
-    if chat and len(json.dumps(chat, ensure_ascii=False).encode()) > config.MAX_HISTORY_BYTES:
+def load_chat(user: User, chat_id: str) -> dict:
+    c = db.conversations.c
+    with db.engine().connect() as conn:
+        row = conn.execute(select(c.title, c["items"]).where(c.id == chat_id, c.user_email == user.email)).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Чат не найден.")
+    return {"id": chat_id, "title": row.title, "chat": dict(row[1])}
+
+
+def save_chat(user: User, chat_id: str, title: str, chat: dict) -> None:
+    if len(json.dumps(chat, ensure_ascii=False).encode()) > config.MAX_HISTORY_BYTES:
         raise HTTPException(status_code=413, detail="История слишком большая. Начните новый чат.")
+    t, c = db.conversations, db.conversations.c
     with db.engine().begin() as conn:
-        if not chat:
-            conn.execute(delete(db.chats).where(db.chats.c.user_email == user.email))
-        elif conn.execute(select(db.chats.c.user_email).where(db.chats.c.user_email == user.email)).first():
-            conn.execute(update(db.chats).where(db.chats.c.user_email == user.email).values(items=chat, updated_at=db.now()))
-        else:
-            conn.execute(insert(db.chats).values(user_email=user.email, items=chat, updated_at=db.now()))
+        owner = conn.execute(select(c.user_email).where(c.id == chat_id)).scalar()
+        if owner is None:
+            conn.execute(
+                insert(t).values(
+                    id=chat_id, user_email=user.email, title=title, items=chat, created_at=db.now(), updated_at=db.now()
+                )
+            )
+        elif owner == user.email:
+            conn.execute(update(t).where(c.id == chat_id).values(title=title, items=chat, updated_at=db.now()))
+        else:  # someone else's id: same answer as a missing chat
+            raise HTTPException(status_code=404, detail="Чат не найден.")
+
+
+def delete_chat(user: User, chat_id: str) -> None:
+    c = db.conversations.c
+    with db.engine().begin() as conn:
+        conn.execute(delete(db.conversations).where(c.id == chat_id, c.user_email == user.email))
 
 
 def admin_summary(trace_url) -> dict:

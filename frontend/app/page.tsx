@@ -11,5 +11,5 @@ export default async function Page() {
   const session = authEnabled ? await auth() : null;
   if (authEnabled && !session?.user?.email) return <SignIn />;
   const user = session?.user ? { name: session.user.name ?? null, email: session.user.email!, image: session.user.image ?? null } : null;
-  return <QorgauApp user={user} authEnabled={authEnabled} />;
+  return <QorgauApp user={user} />;
 }
