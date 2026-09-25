@@ -25,6 +25,9 @@ type Props = {
   question?: string;
   /** Just arrived (not restored from history): words appear one by one. */
   fresh: boolean;
+  feedback?: "up" | "down";
+  /** 👍/👎, sent to Langfuse on this answer's trace. */
+  onRate: (helpful: boolean, comment?: string) => void;
 };
 
 // The whole answer appears in about this long however many words it has.
@@ -36,7 +39,7 @@ const CLAIM_PAUSE = 0.12;
 // words should not type themselves out a second time.
 const revealed = new WeakSet<AskResponse>();
 
-export function AnswerCard({ answer, seconds, onCite, question, fresh }: Props) {
+export function AnswerCard({ answer, seconds, onCite, question, fresh, feedback, onRate }: Props) {
   const status = STATUS[answer.status];
   const reduced = useReducedMotion();
   const [firstTime] = useState(() => fresh && !revealed.has(answer));
@@ -104,6 +107,8 @@ export function AnswerCard({ answer, seconds, onCite, question, fresh }: Props) 
         )}
 
         {answer.removed_claims.length > 0 && <RemovedClaims claims={answer.removed_claims} />}
+
+        {answer.trace_id && <Feedback value={feedback} onRate={onRate} />}
 
         <div className="mt-5">
           <AgentSteps trace={traceFromAnswer(answer)} onCite={onCite} />
@@ -224,5 +229,75 @@ function CopyButton({ text }: { text: () => string }) {
         {state === "done" ? "Скопировано" : state === "failed" ? "Не удалось" : "Копировать"}
       </span>
     </button>
+  );
+}
+
+function Feedback({ value, onRate }: { value?: "up" | "down"; onRate: (helpful: boolean, comment?: string) => void }) {
+  const [comment, setComment] = useState("");
+  const [sent, setSent] = useState(false);
+  const thumb = (up: boolean) => {
+    const active = value === (up ? "up" : "down");
+    return (
+      <button
+        onClick={() => {
+          setSent(false);
+          onRate(up);
+        }}
+        aria-pressed={active}
+        aria-label={up ? "Полезный ответ" : "Бесполезный ответ"}
+        title={up ? "Полезный ответ" : "Бесполезный ответ"}
+        className={`pressable grid size-8 place-items-center rounded-full ${
+          active ? (up ? "bg-green-soft text-green" : "bg-red-soft text-red") : "text-text-2 hover:bg-surface-2 hover:text-text"
+        }`}
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden className={up ? "" : "rotate-180"}>
+          <path d="M5 7l2.6-4.8a1.3 1.3 0 012.4.8L9.4 6.5h3.3a1.5 1.5 0 011.5 1.8l-.9 4.5a1.5 1.5 0 01-1.5 1.2H5zM2 7h3v7H2z" />
+        </svg>
+      </button>
+    );
+  };
+
+  return (
+    <section className="mt-5">
+      <div className="flex items-center gap-1">
+        <span className="t-caption mr-1 text-text-2">{value ? "Спасибо за оценку" : "Ответ был полезен?"}</span>
+        {thumb(true)}
+        {thumb(false)}
+      </div>
+      <AnimatePresence initial={false}>
+        {value === "down" && !sent && (
+          <motion.form
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={spring}
+            className="overflow-hidden"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!comment.trim()) return;
+              onRate(false, comment.trim());
+              setSent(true);
+            }}
+          >
+            <div className="flex gap-2 pt-2">
+              <label htmlFor="feedback-comment" className="sr-only">
+                Что не так с ответом
+              </label>
+              <input
+                id="feedback-comment"
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                maxLength={1000}
+                placeholder="Что не так? Например: не та статья"
+                className="t-caption min-w-0 flex-1 rounded-full border border-hairline bg-surface px-3.5 py-2 outline-none focus-visible:border-accent-ink"
+              />
+              <button type="submit" disabled={!comment.trim()} aria-label="Отправить отзыв" className="pressable t-caption rounded-full bg-accent px-3.5 py-2 font-semibold text-white disabled:bg-surface-2 disabled:text-text-3">
+                Отправить
+              </button>
+            </div>
+          </motion.form>
+        )}
+      </AnimatePresence>
+    </section>
   );
 }

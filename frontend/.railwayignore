@@ -1,0 +1,7 @@
+# Uploaded by `railway up frontend --path-as-root`: keep secrets and build output out.
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+public/avatar/

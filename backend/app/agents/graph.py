@@ -387,6 +387,7 @@ async def answer_question(
     session_id: str | None = None,
     tags: list[str] | None = None,
     on_event: Callable[[dict], Awaitable[None]] | None = None,
+    user_id: str | None = None,
 ) -> dict:
     """Run pipeline C as one Langfuse trace. Returns the final state.
 
@@ -401,6 +402,7 @@ async def answer_question(
     ) as root, propagate_attributes(
         trace_name="answer-question",
         session_id=session_id,
+        user_id=user_id,
         tags=["pipeline:C", *(["document"] if document else []), *(tags or [])],
         metadata={
             "research_model": config.RESEARCH.model,
@@ -426,4 +428,6 @@ async def answer_question(
             output={"status": final["status"], "answer": final["answer"], "sources": final["sources"]},
             metadata={"path": state["path"], "attempts": state.get("attempt", 0) + 1, "evidence": len(state.get("evidence") or [])},
         )
+        # The web app attaches the user's 👍/👎 to this trace.
+        state["trace_id"] = langfuse.get_current_trace_id()
     return state

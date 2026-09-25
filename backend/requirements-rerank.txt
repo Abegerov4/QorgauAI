@@ -1,0 +1,5 @@
+# Optional cross-encoder reranker (app/retrieval/rerank.py, doc section 7).
+# Off by default (RERANK=0): it did not beat plain hybrid search on the golden
+# dataset, and torch would triple the deploy image and its memory.
+#   pip install -r requirements-rerank.txt --extra-index-url https://download.pytorch.org/whl/cpu
+sentence-transformers>=3.2

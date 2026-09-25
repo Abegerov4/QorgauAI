@@ -9,3 +9,4 @@ node_modules/
 *.code-workspace
 backend/data/cache/
 .playwright-mcp/
+backend/data/qorgau.db

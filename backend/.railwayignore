@@ -1,0 +1,14 @@
+# Uploaded by `railway up backend --path-as-root`: keep secrets and local state out.
+.env
+.env.*
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/raw/
+data/cache/
+data/eval/
+data/test_docs/
+data/qorgau.db
+tests/
+scripts/

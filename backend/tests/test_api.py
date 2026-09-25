@@ -67,7 +67,8 @@ def test_ask_stream_sends_progress_then_final(monkeypatch):
         await on_event({"type": "step", "node": "research"})
         await on_event({"type": "tool", **tool})
         return {"final": final, "path": ["guard_input", "research", "verify", "finalize"], "attempt": 0,
-                "tool_log": [tool], "verification": {"checks": [{"supported": True}, {"supported": False}]}}
+                "tool_log": [tool], "verification": {"checks": [{"supported": True}, {"supported": False}]},
+                "trace_id": "trace-42"}
 
     monkeypatch.setattr("app.api.routes.answer_question", fake_answer)
     monkeypatch.setattr(app.state, "graph", object(), raising=False)
@@ -78,3 +79,6 @@ def test_ask_stream_sends_progress_then_final(monkeypatch):
     body = json.loads(resp.text.strip().split("\n\n")[-1].split("data: ", 1)[1])
     assert body["tool_calls"][0]["found"] == tool["found"]
     assert (body["checked_claims"], body["supported_claims"]) == (2, 1)
+    assert body["trace_id"] == "trace-42"
+    stats = client.get("/admin/stats").json()  # local mode: the local admin
+    assert stats["today"]["users"][0]["questions"] == 1

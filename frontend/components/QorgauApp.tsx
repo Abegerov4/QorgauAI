@@ -2,10 +2,12 @@
 
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "motion/react";
 import Image from "next/image";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type AgentEvent, type AskResponse, type Clause, type DocumentResponse } from "@/lib/api";
+import { signOutAction } from "@/app/actions";
+import { api, type AgentEvent, type AskResponse, type Clause, type DocumentResponse, type Me } from "@/lib/api";
 import type { Citation } from "@/lib/citations";
-import { clearChat, loadChat, saveChat } from "@/lib/history";
+import { clearChat, loadChat, saveChat, type SavedChat } from "@/lib/history";
 import { spring, springSnappy } from "@/lib/motion";
 import type { Trace } from "./AgentSteps";
 import { AnswerCard } from "./AnswerCard";
@@ -21,7 +23,7 @@ type Item =
   | { id: string; kind: "question"; text: string; withDocument: string | null }
   | { id: string; kind: "document"; doc: DocumentResponse }
   | { id: string; kind: "pending"; startedAt: number; withDocument: boolean; trace: Trace }
-  | { id: string; kind: "answer"; answer: AskResponse; seconds: number; fresh?: boolean }
+  | { id: string; kind: "answer"; answer: AskResponse; seconds: number; fresh?: boolean; feedback?: "up" | "down" }
   | { id: string; kind: "error"; message: string };
 
 type Tab = "assistant" | "search";
@@ -83,7 +85,9 @@ function applyEvent(t: Trace, e: AgentEvent): Trace {
   return { ...t, verified: [...t.verified.slice(0, -1), { checked: e.checked, supported: e.supported }] };
 }
 
-export function QorgauApp() {
+export type SignedInUser = { name: string | null; email: string; image: string | null };
+
+export function QorgauApp({ user, authEnabled }: { user: SignedInUser | null; authEnabled: boolean }) {
   const [tab, setTab] = useState<Tab>("assistant");
   const [items, setItems] = useState<Item[]>([]);
   const [draft, setDraft] = useState("");
@@ -95,26 +99,38 @@ export function QorgauApp() {
   const sessionId = useRef<string>("");
   const abort = useRef<AbortController | null>(null);
   const restored = useRef(false);
+  const [me, setMe] = useState<Me | null>(null);
   const [away, setAway] = useState(false); // scrolled up from the latest message
   const reduced = useReducedMotion();
 
   const busy = items.some((i) => i.kind === "pending");
 
   useEffect(() => {
-    // sessionStorage exists only in the browser, so history is read after the
-    // first render (the server-rendered page is always the empty chat).
-    const saved = loadChat<Item>();
-    sessionId.current = saved?.sessionId ?? `web-${uid()}`;
-    if (saved?.items.length) {
-      setItems(restoreItems(saved.items));
-      setClauses(saved.clauses ?? []);
+    // Signed in: the conversation lives on the server, on any device. Open
+    // local mode: in this tab's sessionStorage. Either way it is read after
+    // the first render (the server-rendered page is always the empty chat).
+    const apply = (saved: SavedChat<Item> | null) => {
+      sessionId.current = saved?.sessionId ?? `web-${uid()}`;
+      if (saved?.items?.length) {
+        setItems(restoreItems(saved.items));
+        setClauses(saved.clauses ?? []);
+      }
+      restored.current = true;
+    };
+    if (authEnabled) {
+      api
+        .history<SavedChat<Item>>()
+        .then((r) => apply(r.chat))
+        .catch(() => apply(null));
+    } else {
+      apply(loadChat<Item>());
     }
-    restored.current = true;
+    api.me().then(setMe).catch(() => setMe(null));
     api
       .health()
       .then((h) => setOnline(h.qdrant_connected && h.collection_exists))
       .catch(() => setOnline(false));
-  }, []);
+  }, [authEnabled]);
 
   // To the very end of the page: main's bottom padding is what lifts the last
   // message above the fixed composer bar, so scrolling to the thread's last
@@ -130,9 +146,16 @@ export function QorgauApp() {
 
   useEffect(() => {
     if (!restored.current) return; // do not overwrite the history before it is read
-    if (items.length) saveChat({ sessionId: sessionId.current, items, clauses });
-    else clearChat();
-  }, [items, clauses]);
+    const chat = items.length ? { sessionId: sessionId.current, items, clauses } : null;
+    if (!authEnabled) {
+      if (chat) saveChat(chat);
+      else clearChat();
+      return;
+    }
+    // Live progress changes items many times a second; save once it settles.
+    const t = setTimeout(() => api.saveHistory(chat).catch(() => {}), 800);
+    return () => clearTimeout(t);
+  }, [items, clauses, authEnabled]);
 
   // "Back to the latest message" appears once the reader scrolls well up.
   useEffect(() => {
@@ -156,6 +179,17 @@ export function QorgauApp() {
     sessionId.current = `web-${uid()}`;
     window.scrollTo({ top: 0 });
   }
+
+  const rate = useCallback(async (itemId: string, traceId: string, helpful: boolean, comment?: string) => {
+    const mark = (value: "up" | "down" | undefined) =>
+      setItems((xs) => xs.map((x) => (x.id === itemId && x.kind === "answer" ? { ...x, feedback: value } : x)));
+    mark(helpful ? "up" : "down"); // optimistic; undone if the API refuses
+    try {
+      await api.feedback(traceId, helpful, comment);
+    } catch {
+      mark(undefined);
+    }
+  }, []);
 
   const openCitation = useCallback((c: Citation) => setCitation(c), []);
   const closeCitation = useCallback(() => setCitation(null), []);
@@ -199,6 +233,7 @@ export function QorgauApp() {
       const answer = await api.askStream(question, sessionId.current, docId, onEvent, controller.signal);
       const seconds = (Date.now() - startedAt) / 1000;
       setItems((xs) => xs.map((x) => (x.id === pendingId ? { id: pendingId, kind: "answer", answer, seconds, fresh: true } : x)));
+      setMe((m) => (m ? { ...m, questions_today: m.questions_today + 1 } : m));
     } catch (e) {
       const message = controller.signal.aborted ? "Запрос отменён." : (e as Error).message;
       setItems((xs) => xs.map((x) => (x.id === pendingId ? { id: pendingId, kind: "error", message } : x)));
@@ -258,7 +293,7 @@ export function QorgauApp() {
           <div className="aurora" />
         </motion.div>
 
-        <Header tab={tab} onTab={setTab} online={online} onNewChat={items.length > 0 ? newChat : undefined} />
+        <Header tab={tab} onTab={setTab} online={online} onNewChat={items.length > 0 ? newChat : undefined} user={user} me={me} />
 
         <main className={`mx-auto w-full max-w-3xl px-4 pt-8 sm:px-6 ${hero ? "pb-8" : "pb-60"}`}>
           {/* No initial={false} here: Motion passes it down to everything mounted
@@ -322,6 +357,7 @@ export function QorgauApp() {
                         <ThreadItem
                           item={item}
                           question={questionBefore(items, i)}
+                          onRate={rate}
                           onCite={openCitation}
                           onCancel={() => abort.current?.abort()}
                         />
@@ -414,9 +450,15 @@ function questionBefore(items: Item[], index: number): string | undefined {
   }
 }
 
-type ThreadItemProps = { item: Item; question?: string; onCite: (c: Citation) => void; onCancel: () => void };
+type ThreadItemProps = {
+  item: Item;
+  question?: string;
+  onCite: (c: Citation) => void;
+  onCancel: () => void;
+  onRate: (itemId: string, traceId: string, helpful: boolean, comment?: string) => void;
+};
 
-function ThreadItem({ item, question, onCite, onCancel }: ThreadItemProps) {
+function ThreadItem({ item, question, onCite, onCancel, onRate }: ThreadItemProps) {
   switch (item.kind) {
     case "question":
       return (
@@ -434,7 +476,17 @@ function ThreadItem({ item, question, onCite, onCancel }: ThreadItemProps) {
         <Thinking startedAt={item.startedAt} withDocument={item.withDocument} trace={item.trace} onCite={onCite} onCancel={onCancel} />
       );
     case "answer":
-      return <AnswerCard answer={item.answer} seconds={item.seconds} onCite={onCite} question={question} fresh={!!item.fresh} />;
+      return (
+        <AnswerCard
+          answer={item.answer}
+          seconds={item.seconds}
+          onCite={onCite}
+          question={question}
+          fresh={!!item.fresh}
+          feedback={item.feedback}
+          onRate={(helpful, comment) => item.answer.trace_id && onRate(item.id, item.answer.trace_id, helpful, comment)}
+        />
+      );
     case "error":
       return (
         <div className="card t-body flex gap-3 p-5 text-text" role="alert">
@@ -565,9 +617,16 @@ function PillIcon({ className, children }: { className: string; children: React.
   );
 }
 
-type HeaderProps = { tab: Tab; onTab: (t: Tab) => void; online: boolean | null; onNewChat?: () => void };
+type HeaderProps = {
+  tab: Tab;
+  onTab: (t: Tab) => void;
+  online: boolean | null;
+  onNewChat?: () => void;
+  user: SignedInUser | null;
+  me: Me | null;
+};
 
-function Header({ tab, onTab, online, onNewChat }: HeaderProps) {
+function Header({ tab, onTab, online, onNewChat, user, me }: HeaderProps) {
   const tabs: { id: Tab; label: string }[] = [
     { id: "assistant", label: "Помощник" },
     { id: "search", label: "Поиск A/B" },
@@ -624,15 +683,91 @@ function Header({ tab, onTab, online, onNewChat }: HeaderProps) {
             </motion.button>
           )}
         </AnimatePresence>
-        <span className="t-caption hidden items-center gap-1.5 text-text-2 sm:flex" title="Состояние бэкенда и Qdrant">
+        <span
+          className={`t-caption hidden items-center gap-1.5 text-text-2 ${user ? "lg:flex" : "sm:flex"}`}
+          title="Состояние бэкенда и Qdrant"
+        >
           <span
             className={`size-2 rounded-full ${online === null ? "bg-text-3" : online ? "bg-green" : "bg-red"}`}
             aria-hidden
           />
           {online === null ? "Подключение…" : online ? "База подключена" : "Бэкенд недоступен"}
         </span>
+        {user && <UserMenu user={user} me={me} />}
       </div>
     </header>
+  );
+}
+
+function UserMenu({ user, me }: { user: SignedInUser; me: Me | null }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => root.current?.contains(e.target as Node) || setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const initial = (user.name || user.email).trim()[0]?.toUpperCase() ?? "?";
+
+  return (
+    <div ref={root} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label="Меню аккаунта"
+        className="pressable grid size-8 place-items-center overflow-hidden rounded-full bg-accent-soft font-semibold text-accent-ink"
+      >
+        {user.image ? (
+          // eslint-disable-next-line @next/next/no-img-element -- a Google avatar; next/image would need its host allow-listed
+          <img src={user.image} alt="" referrerPolicy="no-referrer" className="size-full object-cover" />
+        ) : (
+          <span className="t-caption">{initial}</span>
+        )}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            role="menu"
+            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+            transition={springSnappy}
+            className="material-thick absolute top-10 right-0 z-40 w-64 origin-top-right rounded-2xl p-2"
+          >
+            <div className="px-2.5 pt-1.5 pb-2.5">
+              <p className="t-body truncate font-semibold">{user.name ?? user.email}</p>
+              <p className="t-caption truncate text-text-2">{user.email}</p>
+              {me && (
+                <p className="t-caption mt-1.5 text-text-3">
+                  {me.daily_limit === null
+                    ? `Администратор · сегодня вопросов: ${me.questions_today}`
+                    : `Сегодня осталось ${Math.max(0, me.daily_limit - me.questions_today)} из ${me.daily_limit} вопросов`}
+                </p>
+              )}
+            </div>
+            <div className="border-t border-hairline pt-1.5">
+              {me?.role === "admin" && (
+                <Link href="/admin" role="menuitem" className="t-body block rounded-xl px-2.5 py-2 hover:bg-surface-2">
+                  Статистика
+                </Link>
+              )}
+              <form action={signOutAction}>
+                <button type="submit" role="menuitem" className="t-body w-full rounded-xl px-2.5 py-2 text-left text-red hover:bg-red-soft">
+                  Выйти
+                </button>
+              </form>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 

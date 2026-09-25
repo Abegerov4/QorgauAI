@@ -86,6 +86,7 @@ class AskResponse(FinalAnswer):
     tool_calls: list[ToolCall] = Field(default_factory=list, description="What the research agent did, in order.")
     checked_claims: int = Field(0, description="Claims the verifier checked on the last pass.")
     supported_claims: int = Field(0, description="Of those, confirmed by the cited norms.")
+    trace_id: str | None = Field(None, description="Langfuse trace of this answer; POST /feedback refers to it.")
 
     @classmethod
     def from_state(cls, state: dict) -> "AskResponse":
@@ -97,7 +98,26 @@ class AskResponse(FinalAnswer):
             tool_calls=state.get("tool_log") or [],
             checked_claims=len(checks),
             supported_claims=sum(c["supported"] for c in checks),
+            trace_id=state.get("trace_id"),
         )
+
+
+class FeedbackRequest(BaseModel):
+    trace_id: str = Field(min_length=1, max_length=64)
+    helpful: bool
+    comment: str | None = Field(None, max_length=1000)
+
+
+class HistoryPayload(BaseModel):
+    chat: dict | None = Field(description="The current conversation as the web app stores it; null clears it.")
+
+
+class MeResponse(BaseModel):
+    email: str
+    name: str | None
+    role: str
+    questions_today: int
+    daily_limit: int | None = Field(description="None for admins: only the global budget applies.")
 
 
 class VacationCalcRequest(BaseModel):

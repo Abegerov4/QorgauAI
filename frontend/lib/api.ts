@@ -30,6 +30,23 @@ export type AskResponse = {
   tool_calls: ToolCall[];
   checked_claims: number;
   supported_claims: number;
+  trace_id: string | null;
+};
+
+export type Me = { email: string; name: string | null; role: "user" | "admin"; questions_today: number; daily_limit: number | null };
+
+export type AdminStats = {
+  today: { spent_usd: number; budget_usd: number; per_user_limit: number; users: { email: string; questions: number; cost_usd: number }[] };
+  week: { questions: number; cost_usd: number; active_users: number; helpful: number; not_helpful: number };
+  users_total: number;
+  negative_feedback: {
+    trace_id: string;
+    trace_url: string | null;
+    comment: string | null;
+    created_at: string;
+    user_email: string;
+    question: string | null;
+  }[];
 };
 
 /** Live progress of /ask/stream. */
@@ -79,12 +96,32 @@ export class ApiError extends Error {
   }
 }
 
+// The API accepts a short-lived token signed by this web app (/api/token) for
+// the signed-in user. Cached until a minute before it expires; in the open
+// local mode /api/token answers 204 and requests go without one.
+let cached: { token: string | null; expiresAt: number } | null = null;
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const now = Date.now() / 1000;
+  if (!cached || (cached.token && cached.expiresAt - 60 < now)) {
+    const resp = await fetch("/api/token", { cache: "no-store" });
+    if (resp.status === 401) throw new ApiError(401, "Сессия истекла. Обновите страницу и войдите снова.");
+    cached = resp.status === 204 ? { token: null, expiresAt: Infinity } : ((await resp.json()) as { token: string; expiresAt: number });
+  }
+  return cached.token ? { Authorization: `Bearer ${cached.token}` } : {};
+}
+
+function withAuth(init: RequestInit | undefined, headers: Record<string, string>): RequestInit {
+  return { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), ...headers } };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = await authHeaders();
   let resp: Response;
   try {
-    resp = await fetch(API_URL + path, init);
+    resp = await fetch(API_URL + path, withAuth(init, headers));
   } catch {
-    throw new ApiError(0, `Бэкенд недоступен по адресу ${API_URL}. Запустите uvicorn из папки backend.`);
+    throw new ApiError(0, `Сервер недоступен (${API_URL}). Попробуйте через минуту.`);
   }
   if (!resp.ok) {
     let detail = `Ошибка сервера (${resp.status})`;
@@ -94,7 +131,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {}
     throw new ApiError(resp.status, detail);
   }
-  return resp.json() as Promise<T>;
+  return (resp.status === 204 ? undefined : resp.json()) as Promise<T>;
 }
 
 async function* sseEvents(resp: Response): AsyncGenerator<{ event: string; data: unknown }> {
@@ -122,7 +159,12 @@ const json = (body: unknown): RequestInit => ({
 });
 
 export const api = {
-  health: () => request<Health>("/health"),
+  // Public: the header shows it before (and without) sign-in.
+  health: async () => {
+    const resp = await fetch(API_URL + "/health");
+    if (!resp.ok) throw new ApiError(resp.status, "Бэкенд недоступен");
+    return (await resp.json()) as Health;
+  },
   ask: (question: string, sessionId: string, documentId?: string, signal?: AbortSignal) =>
     request<AskResponse>("/ask", { ...json({ question, session_id: sessionId, document_id: documentId }), signal }),
   /** Pipeline C with live progress: Server-Sent Events over a POST. */
@@ -135,10 +177,13 @@ export const api = {
   ): Promise<AskResponse> => {
     let resp: Response;
     try {
-      resp = await fetch(API_URL + "/ask/stream", { ...json({ question, session_id: sessionId, document_id: documentId }), signal });
+      resp = await fetch(
+        API_URL + "/ask/stream",
+        withAuth({ ...json({ question, session_id: sessionId, document_id: documentId }), signal }, await authHeaders()),
+      );
     } catch (e) {
       if (signal?.aborted) throw e;
-      throw new ApiError(0, `Бэкенд недоступен по адресу ${API_URL}. Запустите uvicorn из папки backend.`);
+      throw new ApiError(0, `Сервер недоступен (${API_URL}). Попробуйте через минуту.`);
     }
     if (!resp.ok || !resp.body) {
       let detail = `Ошибка сервера (${resp.status})`;
@@ -164,4 +209,10 @@ export const api = {
     request<ArticleResponse>(`/articles/${codeKey}/${encodeURIComponent(number)}`),
   search: (query: string, pipeline: "dense" | "hybrid", topK = 5) =>
     request<SearchResponse>("/search", json({ query, pipeline, top_k: topK })),
+  me: () => request<Me>("/me"),
+  feedback: (traceId: string, helpful: boolean, comment?: string) =>
+    request<void>("/feedback", json({ trace_id: traceId, helpful, comment: comment || undefined })),
+  history: <T>() => request<{ chat: T | null }>("/history"),
+  saveHistory: (chat: unknown) => request<void>("/history", { ...json({ chat }), method: "PUT" }),
+  adminStats: () => request<AdminStats>("/admin/stats"),
 };
