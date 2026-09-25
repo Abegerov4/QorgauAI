@@ -1,12 +1,14 @@
 "use client";
 
+import { DocumentMagnifyingGlassIcon } from "@heroicons/react/20/solid";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import type { DocumentResponse } from "@/lib/api";
 import { DOC_TYPE_LABELS, PII_LABELS, TOPIC_LABELS, plural } from "@/lib/labels";
 import { spring } from "@/lib/motion";
 
-export function DocumentCard({ doc }: { doc: DocumentResponse }) {
+// `onReview` is set until the contract has been reviewed once in this chat.
+export function DocumentCard({ doc, onReview, disabled }: { doc: DocumentResponse; onReview?: () => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const vision = doc.pages.filter((p) => p.method === "vision").length;
   const pages = doc.pages.length;
@@ -37,13 +39,30 @@ export function DocumentCard({ doc }: { doc: DocumentResponse }) {
         </p>
       )}
 
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="pressable t-caption mt-4 font-semibold text-accent-ink"
-      >
-        {open ? "Скрыть пункты" : "Показать извлечённые пункты"}
-      </button>
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+        {onReview && doc.clauses.length > 0 && (
+          <button
+            onClick={onReview}
+            disabled={disabled}
+            className="pressable t-body inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 font-semibold text-white shadow-[var(--shadow-sm)] disabled:opacity-50"
+          >
+            <DocumentMagnifyingGlassIcon className="size-[18px]" aria-hidden />
+            Проверить договор
+          </button>
+        )}
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="pressable t-caption font-semibold text-accent-ink"
+        >
+          {open ? "Скрыть пункты" : "Показать извлечённые пункты"}
+        </button>
+      </div>
+      {onReview && doc.clauses.length > 0 && (
+        <p className="t-caption mt-2 text-text-3">
+          Каждый пункт получит цвет: нарушение, спорно или нарушений не найдено. Считается как один вопрос.
+        </p>
+      )}
       <AnimatePresence initial={false}>
         {open && (
           <motion.div

@@ -3,7 +3,7 @@
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "motion/react";
 import { Bars3Icon, PlusIcon } from "@heroicons/react/20/solid";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type AgentEvent, type AskResponse, type ChatSummary, type Clause, type DocumentResponse, type Me } from "@/lib/api";
+import { api, type AgentEvent, type AskResponse, type ChatSummary, type Clause, type DocumentResponse, type Me, type ReviewRow } from "@/lib/api";
 import type { Citation } from "@/lib/citations";
 import { chatTitle, openChatId, rememberOpenChat, type SavedChat } from "@/lib/history";
 import { spring, springSnappy } from "@/lib/motion";
@@ -11,6 +11,7 @@ import type { Trace } from "./AgentSteps";
 import { AnswerCard } from "./AnswerCard";
 import { CitationView } from "./CitationView";
 import { ACCEPT, Composer } from "./Composer";
+import { ContractReview, ReviewDetail, type ReviewState } from "./ContractReview";
 import { DocumentCard } from "./DocumentCard";
 import { Logo, Wordmark } from "./Logo";
 import { SearchCompare } from "./SearchCompare";
@@ -22,6 +23,7 @@ import { WordRotate } from "./WordRotate";
 type Item =
   | { id: string; kind: "question"; text: string; withDocument: string | null }
   | { id: string; kind: "document"; doc: DocumentResponse }
+  | { id: string; kind: "review"; documentId: string; filename: string; review: ReviewState }
   | { id: string; kind: "pending"; startedAt: number; withDocument: boolean; trace: Trace }
   | { id: string; kind: "answer"; answer: AskResponse; seconds: number; fresh?: boolean; feedback?: "up" | "down" }
   | { id: string; kind: "error"; message: string };
@@ -73,7 +75,9 @@ function restoreItems(items: Item[]): Item[] {
       ? { id: x.id, kind: "error", message: "Ответ не дождался: страница была обновлена. Задайте вопрос ещё раз." }
       : x.kind === "answer"
         ? { ...x, fresh: false }
-        : x,
+        : x.kind === "review" && x.review.status === "running"
+          ? { ...x, review: { ...x.review, status: "error", error: "Проверка прервалась: страница была обновлена." } }
+          : x,
   );
 }
 
@@ -92,6 +96,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
   const [attachment, setAttachment] = useState<{ name: string; uploading: boolean; id?: string } | null>(null);
   const [clauses, setClauses] = useState<Clause[]>([]);
   const [citation, setCitation] = useState<Citation | null>(null);
+  const [reviewRow, setReviewRow] = useState<ReviewRow | null>(null);
   const [online, setOnline] = useState<boolean | null>(null);
   const [dragging, setDragging] = useState(false);
   const sessionId = useRef<string>("");
@@ -107,7 +112,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
   const [away, setAway] = useState(false); // scrolled up from the latest message
   const reduced = useReducedMotion();
 
-  const busy = items.some((i) => i.kind === "pending");
+  const busy = items.some((i) => i.kind === "pending" || (i.kind === "review" && i.review.status === "running"));
 
   const showChat = useCallback((id: string, chat: SavedChat<Item> | null) => {
     const restoredItems = chat?.items?.length ? restoreItems(chat.items) : [];
@@ -148,9 +153,17 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
     [reduced],
   );
 
+  // A contract review is long and its verdict is at the top: keep its header
+  // in view instead of the end of the clause list.
   useEffect(() => {
-    if (items.length) scrollToEnd();
-  }, [items, scrollToEnd]);
+    const last = items[items.length - 1];
+    if (!last) return;
+    if (last.kind === "review") {
+      document.getElementById(`item-${last.id}`)?.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" });
+    } else {
+      scrollToEnd();
+    }
+  }, [items, scrollToEnd, reduced]);
 
   // Save the open chat once live progress settles (it changes items many
   // times a second). Switching chats saves at once instead of waiting.
@@ -292,7 +305,6 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
       setAttachment({ name: doc.filename, uploading: false, id: doc.document_id });
       setClauses(doc.clauses);
       setItems((xs) => [...xs, { id: uid(), kind: "document", doc }]);
-      setDraft((d) => d || REVIEW_QUESTION);
     } catch (e) {
       setAttachment(null);
       setItems((xs) => [...xs, { id: uid(), kind: "error", message: (e as Error).message }]);
@@ -329,6 +341,33 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
     } catch (e) {
       const message = controller.signal.aborted ? "Запрос отменён." : (e as Error).message;
       setItems((xs) => xs.map((x) => (x.id === pendingId ? { id: pendingId, kind: "error", message } : x)));
+    } finally {
+      abort.current = null;
+    }
+  }
+
+  // Colour-coded review of an uploaded contract: a verdict per clause, streamed.
+  async function reviewDocument(doc: DocumentResponse, retryId?: string) {
+    if (busy) return;
+    const id = retryId ?? uid();
+    const start: ReviewState = { status: "running", stage: "search", clauses: doc.clauses, rows: [] };
+    const patch = (fn: (r: ReviewState) => ReviewState) =>
+      setItems((xs) => xs.map((x) => (x.id === id && x.kind === "review" ? { ...x, review: fn(x.review) } : x)));
+    if (retryId) patch(() => start);
+    else setItems((xs) => [...xs, { id, kind: "review", documentId: doc.document_id, filename: doc.filename, review: start }]);
+    const controller = new AbortController();
+    abort.current = controller;
+    try {
+      const review = await api.reviewStream(
+        doc.document_id,
+        (e) => patch((r) => (e.type === "stage" ? { ...r, stage: e.stage } : { ...r, rows: [...r.rows, e] })),
+        controller.signal,
+      );
+      patch((r) => ({ ...r, status: "done", rows: review.clauses, review }));
+      setMe((m) => (m ? { ...m, questions_today: m.questions_today + 1 } : m));
+    } catch (e) {
+      const error = controller.signal.aborted ? "Проверка отменена." : (e as Error).message;
+      patch((r) => ({ ...r, status: "error", error }));
     } finally {
       abort.current = null;
     }
@@ -446,6 +485,8 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
                     {items.map((item, i) => (
                       <motion.div
                         key={item.id}
+                        id={`item-${item.id}`}
+                        className="scroll-mt-20"
                         layout="position"
                         initial={{ opacity: 0, y: 12 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -454,6 +495,10 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
                         <ThreadItem
                           item={item}
                           question={questionBefore(items, i)}
+                          reviewed={item.kind === "document" && items.some((x) => x.kind === "review" && x.documentId === item.doc.document_id)}
+                          busy={busy}
+                          onReview={reviewDocument}
+                          onOpenReview={setReviewRow}
                           onRate={rate}
                           onCite={openCitation}
                           onCancel={() => abort.current?.abort()}
@@ -531,11 +576,15 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
             >
               <div className="text-center">
                 <p className="t-title text-accent-ink">Отпустите, чтобы загрузить договор</p>
-                <p className="t-caption mt-1 text-text-2">PDF, JPG или PNG до 10 МБ</p>
+                <p className="t-caption mt-1 text-text-2">PDF, Word, JPG или PNG до 10 МБ</p>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
+
+        <Sheet open={!!reviewRow} onClose={() => setReviewRow(null)} label="Проверка пункта договора" side>
+          {reviewRow && <ReviewDetail key={reviewRow.clause_number} row={reviewRow} />}
+        </Sheet>
 
         <Sheet open={!!citation} onClose={closeCitation} label="Текст нормы">
           {citation && <CitationView citation={citation} clauses={clauses} />}
@@ -555,12 +604,16 @@ function questionBefore(items: Item[], index: number): string | undefined {
 type ThreadItemProps = {
   item: Item;
   question?: string;
+  reviewed: boolean;
+  busy: boolean;
+  onReview: (doc: DocumentResponse, retryId?: string) => void;
+  onOpenReview: (row: ReviewRow) => void;
   onCite: (c: Citation) => void;
   onCancel: () => void;
   onRate: (itemId: string, traceId: string, helpful: boolean, comment?: string) => void;
 };
 
-function ThreadItem({ item, question, onCite, onCancel, onRate }: ThreadItemProps) {
+function ThreadItem({ item, question, reviewed, busy, onReview, onOpenReview, onCite, onCancel, onRate }: ThreadItemProps) {
   switch (item.kind) {
     case "question":
       return (
@@ -572,7 +625,20 @@ function ThreadItem({ item, question, onCite, onCancel, onRate }: ThreadItemProp
         </div>
       );
     case "document":
-      return <DocumentCard doc={item.doc} />;
+      return <DocumentCard doc={item.doc} onReview={reviewed ? undefined : () => onReview(item.doc)} disabled={busy} />;
+    case "review":
+      return (
+        <ContractReview
+          state={item.review}
+          filename={item.filename}
+          onOpen={onOpenReview}
+          onRetry={
+            item.review.status === "error"
+              ? () => onReview({ document_id: item.documentId, filename: item.filename, clauses: item.review.clauses } as DocumentResponse, item.id)
+              : undefined
+          }
+        />
+      );
     case "pending":
       return (
         <Thinking startedAt={item.startedAt} withDocument={item.withDocument} trace={item.trace} onCite={onCite} onCancel={onCancel} />
@@ -610,7 +676,7 @@ const TOPICS = [
 ];
 
 const STEPS = [
-  { title: "Спросите своими словами", text: "Или загрузите трудовой договор — PDF или фото" },
+  { title: "Спросите своими словами", text: "Или загрузите трудовой договор — PDF, Word или фото" },
   { title: "Агент найдёт нормы", text: "В Трудовом кодексе и Конституции РК" },
   { title: "Второй агент проверит", text: "Каждое утверждение — по тексту статьи" },
 ];

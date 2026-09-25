@@ -15,7 +15,7 @@ type Props = {
   placeholder: string;
 };
 
-export const ACCEPT = "application/pdf,image/jpeg,image/png";
+export const ACCEPT = "application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png";
 
 export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attachment, busy, placeholder }: Props) {
   const area = useRef<HTMLTextAreaElement>(null);
@@ -75,8 +75,8 @@ export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attach
           onClick={() => file.current?.click()}
           disabled={!!attachment?.uploading}
           className="pressable grid size-10 shrink-0 place-items-center rounded-full text-text-2 hover:bg-surface-2 hover:text-text disabled:opacity-40"
-          aria-label="Загрузить договор (PDF, JPG, PNG)"
-          title="Загрузить договор (PDF, JPG, PNG)"
+          aria-label="Загрузить договор (PDF, Word, JPG, PNG)"
+          title="Загрузить договор (PDF, Word, JPG, PNG)"
         >
           <svg width="18" height="20" viewBox="0 0 18 20" fill="none" aria-hidden>
             <path

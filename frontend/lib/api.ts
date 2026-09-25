@@ -60,6 +60,32 @@ export type AgentEvent =
 
 export type Clause = { clause_number: string; topic: string; text: string };
 
+/** One clause of a colour-coded contract review. "ok" means no conflict was found. */
+export type ReviewVerdict = "violation" | "disputed" | "ok" | "unchecked";
+export type ReviewRow = {
+  clause_number: string;
+  topic: string;
+  text: string;
+  verdict: ReviewVerdict;
+  explanation: string;
+  fix: string | null;
+  norms: { citation: string; text: string }[];
+  /** Whether the second agent confirmed a red or yellow verdict; null for green and grey. */
+  verified: boolean | null;
+};
+export type ContractReview = {
+  document_id: string;
+  filename: string;
+  counts: Record<ReviewVerdict, number>;
+  clauses: ReviewRow[];
+  truncated: boolean;
+  disclaimer: string;
+  trace_id: string | null;
+};
+export type ReviewEvent =
+  | { type: "stage"; stage: "search" | "review" | "verify" }
+  | ({ type: "clause" } & ReviewRow);
+
 export type DocumentResponse = {
   document_id: string;
   filename: string;
@@ -161,6 +187,27 @@ const json = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
+/** POST that answers with Server-Sent Events; turns a refused request into an ApiError with the server's message. */
+async function openStream(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+  let resp: Response;
+  try {
+    const init: RequestInit = body === undefined ? { method: "POST", signal } : { ...json(body), signal };
+    resp = await fetch(API_URL + path, withAuth(init, await authHeaders()));
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    throw new ApiError(0, `Сервер недоступен (${API_URL}). Попробуйте через минуту.`);
+  }
+  if (!resp.ok || !resp.body) {
+    let detail = `Ошибка сервера (${resp.status})`;
+    try {
+      const data = await resp.json();
+      if (typeof data.detail === "string") detail = data.detail;
+    } catch {}
+    throw new ApiError(resp.status, detail);
+  }
+  return resp;
+}
+
 export const api = {
   // Public: the header shows it before (and without) sign-in.
   health: async () => {
@@ -178,30 +225,22 @@ export const api = {
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
   ): Promise<AskResponse> => {
-    let resp: Response;
-    try {
-      resp = await fetch(
-        API_URL + "/ask/stream",
-        withAuth({ ...json({ question, session_id: sessionId, document_id: documentId }), signal }, await authHeaders()),
-      );
-    } catch (e) {
-      if (signal?.aborted) throw e;
-      throw new ApiError(0, `Сервер недоступен (${API_URL}). Попробуйте через минуту.`);
-    }
-    if (!resp.ok || !resp.body) {
-      let detail = `Ошибка сервера (${resp.status})`;
-      try {
-        const body = await resp.json();
-        if (typeof body.detail === "string") detail = body.detail;
-      } catch {}
-      throw new ApiError(resp.status, detail);
-    }
+    const resp = await openStream("/ask/stream", { question, session_id: sessionId, document_id: documentId }, signal);
     for await (const { event, data } of sseEvents(resp)) {
       if (event === "final") return data as AskResponse;
       if (event === "error") throw new ApiError(500, "Агент завершился с ошибкой. Попробуйте ещё раз.");
       onEvent({ type: event, ...(data as object) } as AgentEvent);
     }
     throw new ApiError(500, "Соединение прервалось до ответа.");
+  },
+  reviewStream: async (documentId: string, onEvent: (e: ReviewEvent) => void, signal?: AbortSignal): Promise<ContractReview> => {
+    const resp = await openStream(`/documents/${encodeURIComponent(documentId)}/review`, undefined, signal);
+    for await (const { event, data } of sseEvents(resp)) {
+      if (event === "final") return data as ContractReview;
+      if (event === "error") throw new ApiError(500, "Проверка завершилась с ошибкой. Попробуйте ещё раз.");
+      onEvent({ type: event, ...(data as object) } as ReviewEvent);
+    }
+    throw new ApiError(500, "Соединение прервалось до конца проверки.");
   },
   upload: (file: File) => {
     const form = new FormData();

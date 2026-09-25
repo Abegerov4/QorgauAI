@@ -14,6 +14,7 @@ from app.accounts import service as accounts
 from app.accounts.auth import User, admin_user, current_user
 from app.agents.cost import CURRENT, Meter
 from app.agents.graph import answer_question
+from app.agents.review import review_document
 from app.api.schemas import (
     ArticlePoint,
     ArticleResponse,
@@ -118,7 +119,7 @@ def vacation_days(req: VacationCalcRequest) -> dict:
 async def ask(req: AskRequest, request: Request, user: User = Depends(current_user)) -> AskResponse:
     """Pipeline C: guard_input -> research (MCP tools) -> generate -> verify
     -> (rewrite_query -> research, once) -> finalize."""
-    graph, document = _graph_and_document(req, request)
+    graph, document = _graph_and_document(req, request, user)
     accounts.check_quota(user)
     meter = Meter()
     token = CURRENT.set(meter)
@@ -142,7 +143,7 @@ async def ask_stream(req: AskRequest, request: Request, user: User = Depends(cur
     `step` (a graph node started), `tool` (an MCP tool call and the norms it
     returned), `verified` (claims checked), then `final` (the AskResponse) or
     `error`. Closing the connection cancels the agent."""
-    graph, document = _graph_and_document(req, request)
+    graph, document = _graph_and_document(req, request, user)
     accounts.check_quota(user)  # before the stream starts, so the client gets a plain 429
     queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
 
@@ -173,35 +174,30 @@ async def ask_stream(req: AskRequest, request: Request, user: User = Depends(cur
             accounts.log_question(user, req.question, "error", None, meter.usd)
             await queue.put(("error", {}))
 
-    async def events():
-        task = asyncio.create_task(run())
-        try:
-            while True:
-                name, data = await queue.get()
-                yield f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-                if name in ("final", "error"):
-                    break
-        finally:
-            task.cancel()  # client went away or we are done
-
-    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
+    return StreamingResponse(_sse(run, queue), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
 
 
-def _graph_and_document(req: AskRequest, request: Request):
+def _graph_and_document(req: AskRequest, request: Request, user: User):
     graph = getattr(request.app.state, "graph", None)
     if graph is None:
         raise HTTPException(status_code=503, detail="Agent graph is not initialised (app started without lifespan).")
     document = None
     if req.document_id:
-        document = DOCUMENTS.get(req.document_id)
-        if document is None:
-            raise HTTPException(status_code=404, detail="Документ не найден: загрузите его заново через /documents.")
+        document = _own_document(req.document_id, user)
     return graph, document
+
+
+def _own_document(document_id: str, user: User):
+    """An uploaded document, only for the person who uploaded it."""
+    document = DOCUMENTS.get(document_id)
+    if document is None or document.owner not in (None, user.email):
+        raise HTTPException(status_code=404, detail="Документ не найден: загрузите его заново.")
+    return document
 
 
 @router.post("/documents", response_model=DocumentResponse)
 async def upload_document(file: UploadFile, user: User = Depends(current_user)) -> DocumentResponse:
-    """Upload a contract (PDF / JPEG / PNG). Pages with a text layer are read
+    """Upload a contract (PDF / DOCX / JPEG / PNG). Pages with a text layer are read
     directly, scans and photos go through the vision model; PII is masked
     before clauses are extracted. Use the returned id in /ask."""
     accounts.check_quota(user)  # a scan goes through the vision model, so it costs like a question
@@ -210,6 +206,7 @@ async def upload_document(file: UploadFile, user: User = Depends(current_user)) 
     token = CURRENT.set(meter)
     try:
         doc = await ingest_document(data, file.filename or "document")
+        doc.owner = user.email
     except UnsupportedDocument as e:
         raise HTTPException(status_code=415, detail=str(e)) from e
     finally:
@@ -223,6 +220,50 @@ async def upload_document(file: UploadFile, user: User = Depends(current_user)) 
         pii_found=doc.pii_found,
         clauses=doc.findings.clauses,
     )
+
+
+@router.post("/documents/{document_id}/review")
+async def review(document_id: str, user: User = Depends(current_user)) -> StreamingResponse:
+    """Colour-coded review of an uploaded contract, as Server-Sent Events:
+    `stage` (search / review / verify), one `clause` per clause with its
+    verdict, then `final` (the whole review) or `error`. Counts as a question
+    toward the daily limit."""
+    document = _own_document(document_id, user)
+    accounts.check_quota(user)
+    label = f"[проверка договора] {document.filename}"
+    queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
+
+    async def on_event(event: dict) -> None:
+        await queue.put((event["type"], {k: v for k, v in event.items() if k != "type"}))
+
+    async def run() -> None:
+        meter = Meter()
+        CURRENT.set(meter)
+        try:
+            result = await review_document(document, on_event=on_event, user_id=user.email)
+            accounts.log_question(user, label, "review", result["trace_id"], meter.usd)
+            await queue.put(("final", result))
+        except asyncio.CancelledError:
+            accounts.log_question(user, label, "cancelled", None, meter.usd)
+            raise
+        except Exception:
+            log.exception("review failed")
+            accounts.log_question(user, label, "error", None, meter.usd)
+            await queue.put(("error", {}))
+
+    return StreamingResponse(_sse(run, queue), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
+
+
+async def _sse(run, queue: asyncio.Queue):
+    task = asyncio.create_task(run())
+    try:
+        while True:
+            name, data = await queue.get()
+            yield f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+            if name in ("final", "error"):
+                break
+    finally:
+        task.cancel()  # client went away or we are done
 
 
 # ------------------------------------------------------------------ accounts

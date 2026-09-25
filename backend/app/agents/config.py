@@ -38,6 +38,10 @@ VERIFIER = _node("VERIFIER", "gpt-5.5", None, "low", 2000, "gpt-5.4")
 VISION = _node("VISION", "gpt-5.4", 0.0, None, 4000, "gpt-5.5")
 EXTRACTOR = _node("EXTRACTOR", "gpt-5.4-mini", 0.0, None, 3000, "gpt-5.4")
 
+# Contract review (colour-coded verdict per clause): one call rules on every
+# clause at once, so it needs a larger output budget than an answer.
+REVIEWER = _node("REVIEWER", "gpt-5.4", 0.0, None, 6000, "gpt-5.4-mini")
+
 MAX_RESEARCH_STEPS = 4  # tool calls per research pass (doc: planner 2-4 steps)
 # A contract review needs a norm per disputed clause, so it gets more steps.
 MAX_RESEARCH_STEPS_DOCUMENT = 8

@@ -5,6 +5,7 @@ User document ingestion (doc sections 5 and 12.3; course requirement 3.2
     file -> per-page routing:
               text layer (>= 50 chars)  -> PyMuPDF text            (free, instant)
               no text layer / image     -> Vision LLM transcription (OCR)
+              Word (.docx)              -> python-docx text        (free, instant)
          -> PII masking
          -> structured extraction -> DocumentFindings (clauses)
 
@@ -16,7 +17,9 @@ doesn't work at all. The vision model is only called for pages that need it.
 from __future__ import annotations
 
 import base64
+import io
 import uuid
+import zipfile
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -32,6 +35,7 @@ from app.observability import langfuse
 
 MAX_BYTES = 10 * 1024 * 1024
 MAX_PAGES = 10
+MAX_DOCX_CHARS = 60_000  # about ten pages of a contract, the same cap as for PDFs
 TEXT_LAYER_MIN_CHARS = 50
 RENDER_DPI = 200
 _SPACES = str.maketrans({" ": " ", " ": " ", " ": " "})
@@ -69,6 +73,7 @@ class IngestedDocument:
     pii_found: list[str]
     findings: DocumentFindings
     evidence: list[dict] = field(default_factory=list)  # clauses as graph evidence items (D-ids)
+    owner: str | None = None  # who uploaded it; only they can ask about it or review it
 
 
 # Process-local store: enough for the MVP demo (one backend process, no auth).
@@ -80,7 +85,7 @@ class UnsupportedDocument(ValueError):
     pass
 
 
-def detect_kind(data: bytes) -> Literal["pdf", "jpeg", "png"]:
+def detect_kind(data: bytes) -> Literal["pdf", "jpeg", "png", "docx"]:
     """By magic bytes, not by the (user-controlled) file extension."""
     if data.startswith(b"%PDF"):
         return "pdf"
@@ -88,7 +93,41 @@ def detect_kind(data: bytes) -> Literal["pdf", "jpeg", "png"]:
         return "jpeg"
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         return "png"
-    raise UnsupportedDocument("Поддерживаются PDF, JPEG и PNG.")
+    if data.startswith(b"PK\x03\x04") and _is_docx(data):
+        return "docx"
+    raise UnsupportedDocument("Поддерживаются PDF, Word (.docx), JPEG и PNG.")
+
+
+def _is_docx(data: bytes) -> bool:
+    """A .docx is a zip with word/document.xml; other zips (xlsx, archives) are not."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            return "word/document.xml" in z.namelist()
+    except zipfile.BadZipFile:
+        return False
+
+
+def read_docx(data: bytes) -> str:
+    """Paragraphs and table rows in document order. Word's automatic list
+    numbers are not part of the text, so clauses numbered that way reach the
+    extractor without their numbers."""
+    from docx import Document
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    doc = Document(io.BytesIO(data))
+    lines: list[str] = []
+    for block in doc.iter_inner_content():
+        if isinstance(block, Paragraph):
+            lines.append(block.text)
+        elif isinstance(block, Table):
+            for row in block.rows:
+                cells = list(dict.fromkeys(c.text.strip() for c in row.cells))  # merged cells repeat
+                lines.append(" | ".join(c for c in cells if c))
+    text = "\n".join(line.translate(_SPACES).rstrip() for line in lines).strip()
+    if len(text) > MAX_DOCX_CHARS:
+        raise UnsupportedDocument(f"Документ слишком длинный: не больше {MAX_PAGES} страниц.")
+    return text
 
 
 OCR_PROMPT = (
@@ -119,6 +158,11 @@ async def transcribe_image(image: bytes, mime: str, page: int) -> str:
 
 async def read_pages(data: bytes) -> list[PageText]:
     kind = detect_kind(data)
+    if kind == "docx":
+        text = read_docx(data)
+        if not text:
+            raise UnsupportedDocument("В документе Word нет текста.")
+        return [PageText(1, "text_layer", text)]
     if kind in ("jpeg", "png"):
         return [PageText(1, "vision", await transcribe_image(data, f"image/{kind}", 1))]
 

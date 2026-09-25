@@ -1,15 +1,26 @@
 "use client";
 
 import { AnimatePresence, motion, useDragControls, type PanInfo } from "motion/react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { project, spring, springSheet } from "@/lib/motion";
 
-type Props = { open: boolean; onClose: () => void; label: string; children: ReactNode };
+type Props = { open: boolean; onClose: () => void; label: string; children: ReactNode; side?: boolean };
+
+const WIDE = "(min-width: 64rem)";
+const subscribeWide = (cb: () => void) => {
+  const mq = window.matchMedia(WIDE);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+};
 
 // Bottom sheet: enters from and exits to the bottom edge (same path both ways),
 // is dragged 1:1 by its grabber, and on release decides close vs. stay from the
 // *projected* resting point, so a short fast flick dismisses it too.
-export function Sheet({ open, onClose, label, children }: Props) {
+// With `side`, on laptops it is a full-height panel on the right instead, so
+// the content it explains stays visible next to it.
+export function Sheet({ open, onClose, label, children, side = false }: Props) {
+  const wide = useSyncExternalStore(subscribeWide, () => window.matchMedia(WIDE).matches, () => false);
+  const right = side && wide;
   const controls = useDragControls();
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
@@ -38,7 +49,7 @@ export function Sheet({ open, onClose, label, children }: Props) {
   return (
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center">
+        <div className={`fixed inset-0 z-50 flex ${right ? "items-stretch justify-end" : "items-end justify-center"}`}>
           <motion.div
             className="absolute inset-0"
             style={{ background: "var(--scrim)" }}
@@ -55,12 +66,14 @@ export function Sheet({ open, onClose, label, children }: Props) {
             aria-modal="true"
             aria-label={label}
             tabIndex={-1}
-            className="material-thick relative flex max-h-[85dvh] w-full max-w-2xl flex-col rounded-t-[1.75rem] outline-none"
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
+            className={`material-thick relative flex flex-col outline-none ${
+              right ? "h-full w-[30rem] max-w-[90vw] rounded-l-[1.75rem]" : "max-h-[85dvh] w-full max-w-2xl rounded-t-[1.75rem]"
+            }`}
+            initial={right ? { x: "100%" } : { y: "100%" }}
+            animate={right ? { x: 0 } : { y: 0 }}
+            exit={right ? { x: "100%" } : { y: "100%" }}
             transition={springSheet}
-            drag="y"
+            drag={right ? false : "y"}
             dragControls={controls}
             dragListener={false}
             dragConstraints={{ top: 0, bottom: 0 }}
@@ -68,12 +81,16 @@ export function Sheet({ open, onClose, label, children }: Props) {
             dragMomentum={false}
             onDragEnd={onDragEnd}
           >
-            <div
-              className="flex cursor-grab touch-none justify-center pt-2.5 pb-1 active:cursor-grabbing"
-              onPointerDown={(e) => controls.start(e)}
-            >
-              <span className="h-1.5 w-10 rounded-full bg-text-3/40" />
-            </div>
+            {right ? (
+              <div className="h-12 shrink-0" />
+            ) : (
+              <div
+                className="flex cursor-grab touch-none justify-center pt-2.5 pb-1 active:cursor-grabbing"
+                onPointerDown={(e) => controls.start(e)}
+              >
+                <span className="h-1.5 w-10 rounded-full bg-text-3/40" />
+              </div>
+            )}
             <button
               onClick={onClose}
               className="pressable absolute top-3 right-3 grid size-8 place-items-center rounded-full bg-surface-2 text-text-2"
