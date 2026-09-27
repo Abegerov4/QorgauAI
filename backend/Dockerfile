@@ -14,5 +14,6 @@ COPY data/processed ./data/processed
 EXPOSE 8000
 # A fresh Qdrant volume gets indexed on first start; embeddings come from the
 # mounted data/cache when present, so a local re-index costs nothing.
+# Existing collections receive source-note corrections without re-embedding.
 # Railway sets PORT; docker-compose uses the default.
 CMD ["sh", "-c", "python -m app.retrieval.index_corpus --if-empty && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

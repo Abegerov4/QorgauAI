@@ -380,6 +380,8 @@ def load_source_note(slug: str) -> str:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         note = meta.get(slug, {}).get("source_note")
         if note:
+            if "<" in note or ">" in note:
+                raise ValueError(f"Unfilled source_note in meta.json for '{slug}': {note}")
             return note
     print(f"[warn] no source_note in meta.json for '{slug}', using placeholder", file=sys.stderr)
     return "adilet.zan.kz, источник не указан"

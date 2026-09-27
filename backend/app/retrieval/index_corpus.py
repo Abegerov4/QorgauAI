@@ -16,6 +16,7 @@ Usage:
     python -m app.retrieval.index_corpus
     python -m app.retrieval.index_corpus --recreate
     python -m app.retrieval.index_corpus --if-empty   # Docker start-up: index only a fresh Qdrant
+    python -m app.retrieval.index_corpus --refresh-sources  # metadata only; no embedding calls
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 import uuid
 from pathlib import Path
 
@@ -58,6 +60,34 @@ def _stable_id(chunk: dict) -> str:
     # place instead of duplicating points.
     key = f"{chunk['code']}|{chunk['article']}|{chunk['point']}|{chunk['text'][:50]}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, key))
+
+
+def refresh_sources(chunks: list[dict]) -> int:
+    """Update source notes of existing, unchanged chunks without re-embedding.
+
+    Validate the complete payload before changing a date: the stable ID uses
+    only the start of the text and could also identify a different edition.
+    """
+    client = get_client()
+    updates: dict[str, list[str]] = {}
+    for i in range(0, len(chunks), BATCH_SIZE):
+        expected = {_stable_id(c): c for c in chunks[i : i + BATCH_SIZE]}
+        points = client.retrieve(
+            collection_name=COLLECTION_NAME, ids=list(expected), with_payload=True, with_vectors=False,
+        )
+        for point in points:
+            chunk = expected[str(point.id)]
+            payload = point.payload or {}
+            if payload.get("source") == chunk["source"]:
+                continue
+            if any(payload.get(k) != v for k, v in chunk.items() if k != "source"):
+                raise ValueError(f"Corpus differs at {point.id}; re-index before updating source dates")
+            updates.setdefault(chunk["source"], []).append(str(point.id))
+
+    # Only write once all candidate payloads have been checked.
+    for source, ids in updates.items():
+        client.set_payload(collection_name=COLLECTION_NAME, payload={"source": source}, points=ids, wait=True)
+    return sum(len(ids) for ids in updates.values())
 
 
 class DenseCache:
@@ -114,21 +144,35 @@ def index_chunks(chunks: list[dict]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--recreate", action="store_true", help="drop and recreate the collection first")
-    parser.add_argument("--if-empty", action="store_true", help="do nothing if the collection already has points")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--recreate", action="store_true", help="drop and recreate the collection first")
+    mode.add_argument("--if-empty", action="store_true", help="index a fresh collection; refresh source notes in an existing one")
+    mode.add_argument("--refresh-sources", action="store_true", help="refresh source notes only, without embedding or changing vectors")
     args = parser.parse_args()
 
-    if args.if_empty:
-        client = get_client()
-        if client.collection_exists(COLLECTION_NAME) and client.count(COLLECTION_NAME).count > 0:
-            print(f"[skip] {COLLECTION_NAME} already indexed")
-            return
-
-    ensure_collection(recreate=args.recreate)
     chunks = load_chunks()
     if not chunks:
         print(f"[skip] no chunks found in {PROCESSED_DIR} -- run app.ingestion.parse_corpus first")
         return
+
+    if args.refresh_sources:
+        print(f"[ok] refreshed source notes on {refresh_sources(chunks)} chunks")
+        return
+
+    if args.if_empty:
+        client = get_client()
+        if client.collection_exists(COLLECTION_NAME) and client.count(COLLECTION_NAME).count > 0:
+            # Start-up must not fail over metadata: a mismatch leaves the old
+            # dates in place and the API still starts.
+            try:
+                refreshed = refresh_sources(chunks)
+            except Exception as e:
+                print(f"[warn] {COLLECTION_NAME} already indexed; source notes not refreshed: {e}", file=sys.stderr)
+            else:
+                print(f"[skip] {COLLECTION_NAME} already indexed; refreshed source notes on {refreshed} chunks")
+            return
+
+    ensure_collection(recreate=args.recreate)
     print(f"[info] indexing {len(chunks)} chunks from {PROCESSED_DIR}")
     with langfuse.start_as_current_observation(
         as_type="span", name="index-corpus", input={"chunks": len(chunks), "recreate": args.recreate}

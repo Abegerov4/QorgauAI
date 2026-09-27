@@ -1,6 +1,9 @@
 """Graph logic that must hold regardless of what the LLM says -- no API calls."""
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from app.agents import graph
 from app.agents.schemas import ClaimCheck, Verification
@@ -44,10 +47,64 @@ def test_evidence_from_each_tool():
     assert "Итого: 24" in calc[0]["text"] and "Статья 88" in calc[0]["citation"]
 
 
-def test_guard_input_masks_pii_before_any_llm_call():
+def test_guard_input_masks_pii_before_any_llm_call(monkeypatch):
+    telemetry = MagicMock()
+    monkeypatch.setattr(graph, "langfuse", telemetry)
     out = asyncio.run(graph.guard_input({"question": "Мой ИИН 900101300123, сколько дней отпуска?"}))
     assert "900101300123" not in out["question"]
     assert out["pii_masked"] is True
+    assert out["pii_types"] == ["IIN"]
+    assert "900101300123" not in repr(telemetry.mock_calls)
+    assert telemetry.update_current_span.call_args.kwargs["input"]["question"] == out["question"]
+
+
+@pytest.mark.parametrize("question, pii_types", [
+    ("ИИН 900101300123, телефон +7 (701) 123-45-67, почта ivanov@mail.kz: сколько дней отпуска?",
+     ["EMAIL", "IIN", "PHONE"]),
+    ("Сколько дней отпуска по статье 88?", []),
+])
+def test_answer_masks_before_trace_and_graph_and_keeps_guard_result(monkeypatch, question, pii_types):
+    telemetry = MagicMock()
+    monkeypatch.setattr(graph, "langfuse", telemetry)
+    seen = []
+
+    async def research(state):
+        seen.append(state)
+        return {"summary": {"in_scope": False}, "path": [*state["path"], "research"]}
+
+    monkeypatch.setattr(graph, "make_research", lambda toolbox: research)
+    compiled = graph.build_graph(None)
+    invoke = AsyncMock(wraps=compiled.ainvoke)
+    monkeypatch.setattr(compiled, "ainvoke", invoke)
+    on_event = AsyncMock()
+    result = asyncio.run(graph.answer_question(compiled, question, on_event=on_event))
+
+    masked, mapping = graph.mask_pii(question)
+    assert telemetry.start_as_current_observation.call_args.kwargs["input"] == {"question": masked}
+    assert invoke.call_args.args[0]["question"] == masked
+    assert seen[0]["question"] == masked
+    assert result["pii_masked"] is bool(pii_types)
+    assert result["pii_types"] == pii_types
+    guard = telemetry.update_current_span.call_args_list[0].kwargs
+    assert guard["output"]["pii_found"] == pii_types
+    for raw in mapping.values():
+        assert raw not in repr(telemetry.mock_calls)
+        assert raw not in repr(invoke.call_args)
+        assert raw not in repr(on_event.call_args_list)
+    assert result["path"] == ["guard_input", "research", "finalize"]
+    assert on_event.await_count == 2
+    assert graph._ON_EVENT.get() is None
+
+
+def test_answer_does_not_trace_raw_question_when_graph_fails(monkeypatch):
+    telemetry = MagicMock()
+    monkeypatch.setattr(graph, "langfuse", telemetry)
+    compiled = MagicMock(ainvoke=AsyncMock(side_effect=RuntimeError("research failed")))
+    with pytest.raises(RuntimeError, match="research failed"):
+        asyncio.run(graph.answer_question(compiled, "ИИН 900101300123", on_event=AsyncMock()))
+    assert "900101300123" not in repr(telemetry.mock_calls)
+    assert "900101300123" not in repr(compiled.ainvoke.call_args)
+    assert graph._ON_EVENT.get() is None
 
 
 def test_verify_code_critic_overrides_llm(monkeypatch):

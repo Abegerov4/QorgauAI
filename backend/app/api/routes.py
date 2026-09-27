@@ -33,6 +33,7 @@ from app.api.schemas import (
     SourceChunk,
     VacationCalcRequest,
 )
+from app.guardrails.pii import mask_pii
 from app.ingestion.documents import DOCUMENTS, MAX_BYTES, UnsupportedDocument, ingest_document
 from app.mcp_tools.vacation_calculator import calculate_annual_leave
 from app.observability import TRACING_ENABLED, langfuse
@@ -61,13 +62,14 @@ def search(req: SearchRequest, _: User = Depends(current_user)) -> SearchRespons
     A/B/C benchmark. Pipeline C (agentic, with planner/verifier) lives
     under /ask once the agent graph is wired up."""
     fn = dense_only_search if req.pipeline == "dense" else hybrid_search
+    query, _ = mask_pii(req.query)  # before the trace, as in /ask
     with langfuse.start_as_current_observation(
         as_type="span",
         name="search-request",
-        input={"query": req.query, "pipeline": req.pipeline, "top_k": req.top_k},
+        input={"query": query, "pipeline": req.pipeline, "top_k": req.top_k},
     ) as root, propagate_attributes(trace_name="search-request", tags=["api", f"pipeline:{req.pipeline}"]):
         try:
-            results = fn(req.query, top_k=req.top_k)
+            results = fn(query, top_k=req.top_k)
         except RuntimeError as e:
             # e.g. OPENAI_API_KEY not set -- surface clearly instead of a 500 trace.
             root.update(level="ERROR", status_message=str(e))

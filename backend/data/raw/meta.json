@@ -1,4 +1,16 @@
 {
-  "constitution": { "source_note": "adilet.zan.kz, редакция от <впишите дату с сайта>" },
-  "labor_code": { "source_note": "adilet.zan.kz, редакция от <впишите дату с сайта>" }
+  "constitution": {
+    "source_note": "adilet.zan.kz, Конституция принята 15.03.2026 (первоначальная редакция)",
+    "revision_date": "2026-03-15",
+    "source_url": "https://adilet.zan.kz/rus/docs/K2600000000",
+    "verification_url": "https://old.adilet.zan.kz/rus/docs/K2600000000/info",
+    "verified_on": "2026-09-28"
+  },
+  "labor_code": {
+    "source_note": "adilet.zan.kz, редакция от 06.09.2026",
+    "revision_date": "2026-09-06",
+    "source_url": "https://adilet.zan.kz/rus/docs/K1500000414",
+    "verification_url": "https://old.adilet.zan.kz/rus/docs/K1500000414/info",
+    "verified_on": "2026-09-28"
+  }
 }

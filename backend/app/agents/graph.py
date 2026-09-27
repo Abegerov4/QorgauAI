@@ -50,6 +50,7 @@ DISCLAIMER = (
 class AgentState(TypedDict, total=False):
     question: str  # PII-masked
     pii_masked: bool
+    pii_types: list[str]  # categories only; never the placeholder -> original mapping
     research_messages: list[dict]  # kept across the retry so the planner remembers what it already tried
     evidence: list[dict]  # {"id", "citation", "text", "tool"}
     summary: dict | None
@@ -82,13 +83,15 @@ async def _emit(event: dict) -> None:
 async def guard_input(state: AgentState) -> AgentState:
     await _emit({"type": "step", "node": "guard_input"})
     masked, mapping = mask_pii(state["question"])
+    pii_types = sorted(set(state.get("pii_types") or []) | {k.strip("[]").rsplit("_", 1)[0] for k in mapping})
     langfuse.update_current_span(
-        input={"question": state["question"]},  # masked again at export
-        output={"question": masked, "pii_found": sorted({k.strip("[]").rsplit("_", 1)[0] for k in mapping})},
+        input={"question": masked},
+        output={"question": masked, "pii_found": pii_types},
     )
     return {
         "question": masked,
-        "pii_masked": bool(mapping),
+        "pii_masked": state.get("pii_masked", False) or bool(mapping),
+        "pii_types": pii_types,
         "attempt": 0,
         "evidence": list(state.get("evidence") or []),  # uploaded document clauses (D-ids), if any
         "path": ["guard_input"],
@@ -397,6 +400,15 @@ async def answer_question(
 
     `on_event` receives live progress: {"type": "step", "node"} when a node
     starts and {"type": "tool", ...} after each MCP tool call."""
+    # Mask before creating any observation or graph state. Export-time masking
+    # remains a second layer, not the first place raw user input is redacted.
+    question, mapping = mask_pii(question)
+    initial: AgentState = {
+        "question": question,
+        "pii_masked": bool(mapping),
+        "pii_types": sorted({k.strip("[]").rsplit("_", 1)[0] for k in mapping}),
+    }
+    del mapping  # raw values must never enter the graph or telemetry
     with langfuse.start_as_current_observation(
         as_type="agent", name="answer-question", input={"question": question}
     ) as root, propagate_attributes(
@@ -411,7 +423,6 @@ async def answer_question(
             "verifier_model": config.VERIFIER.model,
         },
     ):
-        initial: AgentState = {"question": question}
         if document is not None:
             initial["evidence"] = list(document.evidence)
             initial["document_block"] = "\n".join(
