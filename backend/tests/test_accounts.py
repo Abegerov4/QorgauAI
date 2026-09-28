@@ -159,3 +159,73 @@ def test_quota_blocks_the_agent_before_it_runs(monkeypatch):
         service.log_question(USER, "вопрос", "answered", None, 0.0)
     resp = client.post("/ask/stream", json={"question": "ещё"}, headers=token(USER.email))
     assert resp.status_code == 429 and called == []
+
+
+def test_admin_users_list_detail_and_votes(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_REQUIRED", True)
+    client.get("/me", headers=token(USER.email, name="Айгерим"))
+    service.log_question(USER, "Мой ИИН 900101300123, отпуск?", "answered", "t1", 0.02)
+    service.log_question(USER, "второй", "refused", "t2", 0.01)
+    service.save_feedback(USER, "t1", 0, "не то")
+    assert client.get("/admin/users", headers=token(USER.email, name="Айгерим")).status_code == 403
+
+    body = client.get("/admin/users", headers=token(ADMIN.email)).json()
+    assert body["default_limit"] == 3
+    row = next(u for u in body["users"] if u["email"] == USER.email)
+    assert (row["name"], row["questions"], row["questions_today"], row["cost_usd"]) == ("Айгерим", 2, 2, 0.03)
+    assert (row["helpful"], row["not_helpful"], row["blocked"], row["question_limit"]) == (0, 1, False, 3)
+
+    detail = client.get(f"/admin/users/{USER.email.upper()}", headers=token(ADMIN.email)).json()
+    by_status = {q["status"]: q for q in detail["questions"]}
+    assert "900101300123" not in by_status["answered"]["question"]
+    assert (by_status["answered"]["helpful"], by_status["answered"]["comment"]) == (False, "не то")
+    assert by_status["refused"]["helpful"] is None
+    assert client.get("/admin/users/nobody@example.com", headers=token(ADMIN.email)).status_code == 404
+
+
+def test_admin_sets_a_personal_limit(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_REQUIRED", True)
+    client.get("/me", headers=token(USER.email))
+    for _ in range(3):
+        service.log_question(USER, "вопрос", "answered", None, 0.0)
+    assert client.patch(f"/admin/users/{USER.email}", json={"daily_limit": 0}, headers=token(ADMIN.email)).status_code == 422
+    row = client.patch(f"/admin/users/{USER.email}", json={"daily_limit": 5}, headers=token(ADMIN.email)).json()
+    assert (row["daily_limit"], row["question_limit"]) == (5, 5)
+    assert client.get("/me", headers=token(USER.email)).json()["daily_limit"] == 5
+    user = User(USER.email, USER.name, "user", 5)
+    service.check_quota(user)  # 3 of 5
+    # null resets to the default, which is used up
+    row = client.patch(f"/admin/users/{USER.email}", json={"daily_limit": None}, headers=token(ADMIN.email)).json()
+    assert (row["daily_limit"], row["question_limit"]) == (None, 3)
+    with pytest.raises(Exception) as e:
+        service.check_quota(User(USER.email, USER.name, "user", None))
+    assert e.value.status_code == 429
+
+
+def test_blocked_user_is_locked_out_but_admin_cannot_be_blocked(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_REQUIRED", True)
+    client.get("/me", headers=token(USER.email))
+    client.get("/me", headers=token(ADMIN.email))
+    assert client.patch(f"/admin/users/{USER.email}", json={"blocked": True}, headers=token(ADMIN.email)).json()["blocked"]
+    resp = client.get("/me", headers=token(USER.email))
+    assert resp.status_code == 403 and "ограничен" in resp.json()["detail"]
+    assert client.get("/chats", headers=token(USER.email)).status_code == 403
+    assert client.patch(f"/admin/users/{USER.email}", json={"blocked": False}, headers=token(ADMIN.email)).status_code == 200
+    assert client.get("/me", headers=token(USER.email)).status_code == 200
+    assert client.patch(f"/admin/users/{ADMIN.email}", json={"blocked": True}, headers=token(ADMIN.email)).status_code == 400
+    assert client.patch(f"/admin/users/{USER.email}", json={"blocked": None}, headers=token(ADMIN.email)).status_code == 422
+
+
+def test_users_table_from_before_the_admin_columns_gets_them(tmp_path):
+    from sqlalchemy import Column, DateTime, MetaData, String, Table, create_engine, inspect
+
+    url = f"sqlite:///{tmp_path / 'old.db'}"
+    old = Table("users", MetaData(), Column("email", String(320), primary_key=True), Column("name", String(200)),
+                Column("created_at", DateTime(), nullable=False), Column("last_seen_at", DateTime(), nullable=False))
+    with create_engine(url).begin() as conn:
+        old.create(conn)
+        conn.execute(old.insert().values(email=USER.email, name="Old", created_at=db.now(), last_seen_at=db.now()))
+    db.reset_engine(url)
+    assert {"blocked", "daily_limit"} <= {c["name"] for c in inspect(db.engine()).get_columns("users")}
+    row = service.admin_users(USER.email)[0]
+    assert (row["blocked"], row["daily_limit"], row["question_limit"]) == (False, None, 3)

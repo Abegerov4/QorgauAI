@@ -6,10 +6,10 @@ import json
 from datetime import timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import case, delete, func, insert, select, update
 
 from app.accounts import config, db
-from app.accounts.auth import User
+from app.accounts.auth import User, role_of
 from app.guardrails.pii import mask_pii
 
 
@@ -38,11 +38,9 @@ def check_quota(user: User) -> None:
     if spent_today() >= config.DAILY_BUDGET_USD:
         raise HTTPException(status_code=429, detail="Дневной бюджет сервиса исчерпан. Попробуйте завтра.")
     count, _ = usage_today(user.email)
-    if not user.is_admin and count >= config.DAILY_QUESTIONS_PER_USER:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Лимит {config.DAILY_QUESTIONS_PER_USER} вопросов в день исчерпан. Попробуйте завтра.",
-        )
+    limit = user.question_limit
+    if limit is not None and count >= limit:
+        raise HTTPException(status_code=429, detail=f"Лимит {limit} вопросов в день исчерпан. Попробуйте завтра.")
 
 
 def log_question(user: User, question: str, status: str, trace_id: str | None, cost_usd: float) -> None:
@@ -174,3 +172,108 @@ def admin_summary(trace_url) -> dict:
             for t, c, at, u, q in negative
         ],
     }
+
+
+def _iso(at) -> str | None:
+    return at.isoformat() + "Z" if at else None
+
+
+def admin_users(email: str | None = None) -> list[dict]:
+    """Every user with their totals; with `email`, only that one."""
+    u, q, f = db.users.c, db.questions.c, db.feedback.c
+    asked = (
+        select(
+            q.user_email,
+            func.count().label("questions"),
+            func.sum(case((q.created_at >= db.start_of_day(), 1), else_=0)).label("today"),
+            func.coalesce(func.sum(q.cost_usd), 0.0).label("cost"),
+            func.max(q.created_at).label("last_question"),
+        )
+        .group_by(q.user_email)
+        .subquery()
+    )
+    votes = (
+        select(
+            f.user_email,
+            func.sum(case((f.value == 1, 1), else_=0)).label("helpful"),
+            func.sum(case((f.value == 0, 1), else_=0)).label("not_helpful"),
+        )
+        .group_by(f.user_email)
+        .subquery()
+    )
+    query = (
+        select(u.email, u.name, u.created_at, u.last_seen_at, u.blocked, u.daily_limit,
+               asked.c.questions, asked.c.today, asked.c.cost, asked.c.last_question, votes.c.helpful, votes.c.not_helpful)
+        .select_from(db.users.outerjoin(asked, asked.c.user_email == u.email).outerjoin(votes, votes.c.user_email == u.email))
+        .order_by(u.last_seen_at.desc())
+    )
+    if email is not None:
+        query = query.where(u.email == email)
+    with db.engine().connect() as conn:
+        rows = conn.execute(query).all()
+    out = []
+    for r in rows:
+        user = User(r.email, r.name, role_of(r.email), r.daily_limit)
+        out.append({
+            "email": r.email,
+            "name": r.name,
+            "role": user.role,
+            "blocked": bool(r.blocked),
+            "daily_limit": r.daily_limit,
+            "question_limit": user.question_limit,
+            "created_at": _iso(r.created_at),
+            "last_seen_at": _iso(r.last_seen_at),
+            "last_question_at": _iso(r.last_question),
+            "questions": int(r.questions or 0),
+            "questions_today": int(r.today or 0),
+            "cost_usd": round(float(r.cost or 0.0), 4),
+            "helpful": int(r.helpful or 0),
+            "not_helpful": int(r.not_helpful or 0),
+        })
+    return out
+
+
+def admin_user_detail(email: str, trace_url, limit: int = 200) -> dict:
+    """One user and their latest questions, each with its vote and trace link."""
+    found = admin_users(email)
+    if not found:
+        raise HTTPException(status_code=404, detail="Пользователь не найден.")
+    q, f = db.questions.c, db.feedback.c
+    with db.engine().connect() as conn:
+        rows = conn.execute(
+            select(q.id, q.question, q.status, q.trace_id, q.cost_usd, q.created_at, f.value, f.comment)
+            .select_from(
+                db.questions.outerjoin(db.feedback, (f.trace_id == q.trace_id) & (f.user_email == q.user_email))
+            )
+            .where(q.user_email == email)
+            .order_by(q.created_at.desc())
+            .limit(limit)
+        ).all()
+    return {
+        "user": found[0],
+        "questions": [
+            {
+                "id": r.id,
+                "question": r.question,
+                "status": r.status,
+                "cost_usd": round(float(r.cost_usd or 0.0), 4),
+                "created_at": _iso(r.created_at),
+                "trace_url": trace_url(r.trace_id),
+                "helpful": None if r.value is None else bool(r.value),
+                "comment": r.comment,
+            }
+            for r in rows
+        ],
+    }
+
+
+def admin_update_user(email: str, changes: dict) -> dict:
+    """`changes` holds only the fields the admin sent: blocked, daily_limit."""
+    if not admin_users(email):
+        raise HTTPException(status_code=404, detail="Пользователь не найден.")
+    if changes.get("blocked") and role_of(email) == "admin":
+        raise HTTPException(status_code=400, detail="Администратора заблокировать нельзя.")
+    if changes:
+        with db.engine().begin() as conn:
+            conn.execute(update(db.users).where(db.users.c.email == email).values(**changes))
+    return admin_users(email)[0]

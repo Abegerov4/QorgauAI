@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -20,6 +21,7 @@ from sqlalchemy import (
     func,
     inspect,
     select,
+    text,
 )
 from sqlalchemy.engine import Engine
 
@@ -34,6 +36,10 @@ users = Table(
     Column("name", String(200)),
     Column("created_at", DateTime(), nullable=False),
     Column("last_seen_at", DateTime(), nullable=False),
+    # Set from the admin page. A blocked user gets 403 everywhere; daily_limit
+    # None means the default DAILY_QUESTIONS_PER_USER.
+    Column("blocked", Boolean, nullable=False, default=False, server_default=text("FALSE")),
+    Column("daily_limit", Integer),
 )
 
 # One row per question: the daily quota counts rows, the budget sums cost,
@@ -101,7 +107,19 @@ def init_db() -> None:
 
         Path(config.DATABASE_URL.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     metadata.create_all(engine())
+    _add_user_columns()
     _migrate_legacy_chats()
+
+
+def _add_user_columns() -> None:
+    """create_all never alters an existing table: add the admin columns to a
+    users table created before them."""
+    with engine().begin() as conn:
+        have = {c["name"] for c in inspect(conn).get_columns("users")}
+        if "blocked" not in have:
+            conn.execute(text("ALTER TABLE users ADD COLUMN blocked BOOLEAN NOT NULL DEFAULT FALSE"))
+        if "daily_limit" not in have:
+            conn.execute(text("ALTER TABLE users ADD COLUMN daily_limit INTEGER"))
 
 
 def _migrate_legacy_chats() -> None:

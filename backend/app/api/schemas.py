@@ -133,6 +133,13 @@ class MeResponse(BaseModel):
     daily_limit: int | None = Field(description="None for admins: only the global budget applies.")
 
 
+class AdminUserUpdate(BaseModel):
+    """Only the fields sent are changed; daily_limit null resets to the default."""
+
+    blocked: bool | None = None
+    daily_limit: int | None = Field(None, ge=1, le=1000)
+
+
 class VacationCalcRequest(BaseModel):
     hazardous_work: bool = False
     disability_group_1_or_2: bool = False

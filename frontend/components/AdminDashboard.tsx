@@ -4,6 +4,7 @@ import { HandThumbDownIcon, HandThumbUpIcon } from "@heroicons/react/16/solid";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ApiError, api, type AdminStats } from "@/lib/api";
+import { AdminUsers } from "./AdminUsers";
 
 const usd = (n: number) => `$${n.toFixed(n < 1 ? 3 : 2)}`;
 
@@ -19,7 +20,7 @@ export function AdminDashboard() {
   }, []);
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
+    <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
       <Link href="/" className="t-caption font-medium text-accent-ink">
         ← К помощнику
       </Link>
@@ -41,32 +42,7 @@ export function AdminDashboard() {
             />
           </section>
 
-          <section className="card mt-4 p-5">
-            <h2 className="t-title">Сегодня по пользователям</h2>
-            <p className="t-caption mt-1 text-text-3">Лимит — {stats.today.per_user_limit} вопросов в день на человека.</p>
-            {stats.today.users.length === 0 ? (
-              <p className="t-body mt-3 text-text-2">Сегодня вопросов ещё не было.</p>
-            ) : (
-              <table className="t-body mt-3 w-full">
-                <thead>
-                  <tr className="t-caption text-left text-text-3">
-                    <th className="py-1.5 font-medium">Пользователь</th>
-                    <th className="py-1.5 text-right font-medium">Вопросов</th>
-                    <th className="py-1.5 text-right font-medium">Стоимость</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats.today.users.map((u) => (
-                    <tr key={u.email} className="border-t border-hairline">
-                      <td className="max-w-0 truncate py-2 pr-3">{u.email}</td>
-                      <td className="py-2 text-right tabular-nums">{u.questions}</td>
-                      <td className="py-2 text-right tabular-nums">{usd(u.cost_usd)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </section>
+          <AdminUsers />
 
           <section className="card mt-4 p-5">
             <h2 className="t-title flex items-center gap-2">

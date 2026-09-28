@@ -16,6 +16,7 @@ from app.agents.cost import CURRENT, Meter
 from app.agents.graph import answer_question
 from app.agents.review import review_document
 from app.api.schemas import (
+    AdminUserUpdate,
     ArticlePoint,
     ArticleResponse,
     AskRequest,
@@ -279,7 +280,7 @@ def me(user: User = Depends(current_user)) -> MeResponse:
         name=user.name,
         role=user.role,
         questions_today=count,
-        daily_limit=None if user.is_admin else accounts_config.DAILY_QUESTIONS_PER_USER,
+        daily_limit=user.question_limit,
     )
 
 
@@ -325,6 +326,27 @@ def remove_chat(chat_id: ChatId, user: User = Depends(current_user)) -> None:
 @router.get("/admin/stats")
 def admin_stats(_: User = Depends(admin_user)) -> dict:
     return accounts.admin_summary(_trace_url)
+
+
+UserEmail = Annotated[str, Path(min_length=3, max_length=320)]
+
+
+@router.get("/admin/users")
+def admin_users(_: User = Depends(admin_user)) -> dict:
+    return {"default_limit": accounts_config.DAILY_QUESTIONS_PER_USER, "users": accounts.admin_users()}
+
+
+@router.get("/admin/users/{email}")
+def admin_user_detail(email: UserEmail, _: User = Depends(admin_user)) -> dict:
+    return accounts.admin_user_detail(email.lower(), _trace_url)
+
+
+@router.patch("/admin/users/{email}")
+def admin_update_user(email: UserEmail, payload: AdminUserUpdate, _: User = Depends(admin_user)) -> dict:
+    changes = payload.model_dump(exclude_unset=True)
+    if changes.get("blocked", False) is None:
+        raise HTTPException(status_code=422, detail="blocked должен быть true или false.")
+    return accounts.admin_update_user(email.lower(), changes)
 
 
 def _trace_url(trace_id: str | None) -> str | None:

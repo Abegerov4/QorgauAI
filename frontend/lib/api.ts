@@ -52,6 +52,35 @@ export type AdminStats = {
   }[];
 };
 
+/** A row of the admin users table. Dates are ISO UTC; question_limit is null for admins. */
+export type AdminUser = {
+  email: string;
+  name: string | null;
+  role: "user" | "admin";
+  blocked: boolean;
+  daily_limit: number | null;
+  question_limit: number | null;
+  created_at: string;
+  last_seen_at: string;
+  last_question_at: string | null;
+  questions: number;
+  questions_today: number;
+  cost_usd: number;
+  helpful: number;
+  not_helpful: number;
+};
+
+export type AdminQuestion = {
+  id: number;
+  question: string;
+  status: string | null;
+  cost_usd: number;
+  created_at: string;
+  trace_url: string | null;
+  helpful: boolean | null;
+  comment: string | null;
+};
+
 /** Live progress of /ask/stream. */
 export type AgentEvent =
   | { type: "step"; node: string }
@@ -260,4 +289,9 @@ export const api = {
     request<void>(`/chats/${encodeURIComponent(id)}`, { ...json({ title, chat }), method: "PUT" }),
   deleteChat: (id: string) => request<void>(`/chats/${encodeURIComponent(id)}`, { method: "DELETE" }),
   adminStats: () => request<AdminStats>("/admin/stats"),
+  adminUsers: () => request<{ default_limit: number; users: AdminUser[] }>("/admin/users"),
+  adminUser: (email: string) =>
+    request<{ user: AdminUser; questions: AdminQuestion[] }>(`/admin/users/${encodeURIComponent(email)}`),
+  adminUpdateUser: (email: string, changes: { blocked?: boolean; daily_limit?: number | null }) =>
+    request<AdminUser>(`/admin/users/${encodeURIComponent(email)}`, { ...json(changes), method: "PATCH" }),
 };
