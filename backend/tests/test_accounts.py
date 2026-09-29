@@ -246,3 +246,25 @@ def test_renamed_chat_keeps_its_title_on_later_saves(monkeypatch):
     assert client.patch("/chats/web-r", json={"title": "   "}, headers=headers).status_code == 422
     # someone else's chat looks missing
     assert client.patch("/chats/web-r", json={"title": "Чужой"}, headers=token(ADMIN.email)).status_code == 404
+
+
+def test_parallel_first_visit_does_not_fail(monkeypatch):
+    """/me and /chats arrive together on a first visit: the second insert
+    loses the race and must fall back to updating the row."""
+    from app.accounts import auth
+
+    real = auth._upsert_visit
+    calls = []
+
+    def racing(user):
+        calls.append(1)
+        if len(calls) == 1:  # the other request inserts first
+            real(user)
+            with db.engine().begin() as conn:
+                conn.execute(db.users.insert().values(email=user.email, name=user.name, created_at=db.now(), last_seen_at=db.now()))
+        return real(user)
+
+    monkeypatch.setattr(auth, "_upsert_visit", racing)
+    monkeypatch.setattr(config, "AUTH_REQUIRED", True)
+    assert client.get("/me", headers=token("new@example.com")).status_code == 200
+    assert len(calls) == 2

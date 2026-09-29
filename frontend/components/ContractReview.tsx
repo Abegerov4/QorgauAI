@@ -9,14 +9,23 @@ import {
   MinusCircleIcon,
   XCircleIcon,
 } from "@heroicons/react/20/solid";
-import { DocumentMagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import {
+  ArrowDownTrayIcon,
+  ChatBubbleLeftRightIcon,
+  DocumentArrowDownIcon,
+  DocumentMagnifyingGlassIcon,
+  EnvelopeIcon,
+} from "@heroicons/react/24/outline";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Clause, ContractReview as Review, ReviewRow, ReviewVerdict } from "@/lib/api";
 import { citationLabel, parseCitation } from "@/lib/citations";
 import { plural } from "@/lib/labels";
 import { spring, springSnappy } from "@/lib/motion";
+import { employerLetter } from "@/lib/reviewText";
 import { CitationView } from "./CitationView";
+import { ReviewReport } from "./ReviewReport";
+import { Sheet } from "./Sheet";
 
 // The contract as a document with every clause coloured by its verdict:
 // red — contradicts a norm (confirmed by the second agent), yellow — disputed
@@ -54,6 +63,9 @@ type Props = { state: ReviewState; filename: string; onOpen: (row: ReviewRow) =>
 
 export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
   const [problemsOnly, setProblemsOnly] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const [letter, setLetter] = useState(false);
+  const donePrinting = useCallback(() => setPrinting(false), []);
   const running = state.status === "running";
   const byNumber = new Map(state.rows.map((r) => [r.clause_number, r]));
   const counts = state.review?.counts ?? countRows(state.rows);
@@ -90,13 +102,27 @@ export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
         <ShareBar counts={counts} total={listed.length} running={running} />
 
         {state.status === "done" && (
-          <div className="mt-3 flex items-center gap-1.5" role="group" aria-label="Какие пункты показать">
-            <FilterChip active={!problemsOnly} onClick={() => setProblemsOnly(false)}>
-              Все {listed.length}
-            </FilterChip>
-            <FilterChip active={problemsOnly} onClick={() => setProblemsOnly(true)} disabled={problems === 0}>
-              Только проблемы {problems}
-            </FilterChip>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <div className="flex items-center gap-1.5" role="group" aria-label="Какие пункты показать">
+              <FilterChip active={!problemsOnly} onClick={() => setProblemsOnly(false)}>
+                Все {listed.length}
+              </FilterChip>
+              <FilterChip active={problemsOnly} onClick={() => setProblemsOnly(true)} disabled={problems === 0}>
+                Только проблемы {problems}
+              </FilterChip>
+            </div>
+            {state.review && (
+              <div className="flex items-center gap-1.5 sm:ml-auto">
+                <ActionButton onClick={() => setPrinting(true)} icon={<DocumentArrowDownIcon className="size-4" aria-hidden />}>
+                  PDF-отчёт
+                </ActionButton>
+                {counts.violation + counts.disputed > 0 && (
+                  <ActionButton onClick={() => setLetter(true)} icon={<EnvelopeIcon className="size-4" aria-hidden />}>
+                    Письмо работодателю
+                  </ActionButton>
+                )}
+              </div>
+            )}
           </div>
         )}
         {state.status === "error" && onRetry && (
@@ -124,7 +150,84 @@ export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
           <p className="t-caption text-text-3">{state.review.disclaimer}</p>
         </footer>
       )}
+
+      {printing && state.review && <ReviewReport review={state.review} onDone={donePrinting} />}
+      <Sheet open={letter} onClose={() => setLetter(false)} label="Письмо работодателю" side>
+        {letter && state.review && <LetterView review={state.review} />}
+      </Sheet>
     </article>
+  );
+}
+
+function ActionButton({ onClick, icon, children }: { onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="pressable t-caption inline-flex items-center gap-1.5 rounded-full border border-hairline bg-surface px-3 py-1 font-semibold text-text-2 hover:bg-surface-2 hover:text-text"
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+// A draft the user edits (placeholders in [brackets]) and then copies or saves.
+function LetterView({ review }: { review: Review }) {
+  const [text, setText] = useState(() => employerLetter(review));
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  function download() {
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: "Письмо работодателю.txt" });
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="pb-2">
+      <h2 className="t-title pr-10">Письмо работодателю</h2>
+      <p className="t-caption mt-1 text-text-2">
+        Черновик по нарушениям из проверки, со ссылками на статьи. Замените текст в [квадратных скобках] и перечитайте перед отправкой.
+      </p>
+      <label htmlFor="letter" className="sr-only">
+        Текст письма
+      </label>
+      <textarea
+        id="letter"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={20}
+        className="t-body mt-3 w-full resize-y rounded-2xl border border-hairline bg-surface p-3.5 text-[0.9375rem] leading-relaxed outline-none focus:border-accent"
+      />
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => navigator.clipboard.writeText(text).then(() => setCopied(true), () => {})}
+          className="pressable t-caption inline-flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 font-semibold text-white"
+        >
+          {copied ? <CheckIcon className="size-4" aria-hidden /> : <ClipboardDocumentIcon className="size-4" aria-hidden />}
+          {copied ? "Скопировано" : "Скопировать"}
+        </button>
+        <button
+          onClick={download}
+          className="pressable t-caption inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3.5 py-1.5 font-semibold text-text"
+        >
+          <ArrowDownTrayIcon className="size-4" aria-hidden />
+          Скачать .txt
+        </button>
+        <button
+          onClick={() => setText(employerLetter(review))}
+          className="pressable t-caption px-2 py-1.5 font-medium text-text-2 hover:text-text"
+        >
+          Вернуть исходный текст
+        </button>
+      </div>
+      <p className="t-caption mt-3 text-text-3">Это информационный черновик, а не юридическая консультация. В споре обратитесь к юристу.</p>
+    </div>
   );
 }
 
@@ -253,7 +356,7 @@ function ClauseLine({ clause, row, index, onOpen }: { clause: Clause; row?: Revi
 }
 
 /** What the side panel shows for one clause: the verdict, the norm, and a lawful rewording. */
-export function ReviewDetail({ row }: { row: ReviewRow }) {
+export function ReviewDetail({ row, onAsk }: { row: ReviewRow; onAsk?: (row: ReviewRow) => void }) {
   const v = VERDICT[row.verdict];
   const [article, setArticle] = useState<string | null>(null);
   const Icon = v.icon;
@@ -316,6 +419,16 @@ export function ReviewDetail({ row }: { row: ReviewRow }) {
             <CopyFix text={row.fix} />
           </div>
         </>
+      )}
+
+      {onAsk && (
+        <button
+          onClick={() => onAsk(row)}
+          className="pressable t-body mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-hairline bg-surface px-4 py-2.5 font-semibold text-text hover:bg-surface-2"
+        >
+          <ChatBubbleLeftRightIcon className="size-5 text-accent-ink" aria-hidden />
+          Спросить про этот пункт
+        </button>
       )}
     </div>
   );

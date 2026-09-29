@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 import jwt
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 
 from app.accounts import config, db
 
@@ -57,6 +58,15 @@ def decode(token: str) -> dict:
 
 def _remember(user: User) -> tuple[bool, int | None]:
     """Records the visit; returns what the admin set: (blocked, daily_limit)."""
+    try:
+        return _upsert_visit(user)
+    except IntegrityError:
+        # A first visit sends several requests at once (/me, /chats): another
+        # one inserted the row between our select and insert. It exists now.
+        return _upsert_visit(user)
+
+
+def _upsert_visit(user: User) -> tuple[bool, int | None]:
     with db.engine().begin() as conn:
         seen = conn.execute(select(db.users.c.blocked, db.users.c.daily_limit).where(db.users.c.email == user.email)).first()
         if seen:

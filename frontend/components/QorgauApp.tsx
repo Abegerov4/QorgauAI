@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type AgentEvent, type AskResponse, type ChatSummary, type Clause, type DocumentResponse, type Me, type ReviewRow } from "@/lib/api";
 import type { Citation } from "@/lib/citations";
 import { chatTitle, openChatId, rememberOpenChat, type SavedChat } from "@/lib/history";
+import { clauseQuestion } from "@/lib/reviewText";
 import { spring, springSnappy } from "@/lib/motion";
 import type { Trace } from "./AgentSteps";
 import { AnswerCard } from "./AnswerCard";
@@ -244,6 +245,18 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
       showChat(`web-${uid()}`, null);
     }
     await api.deleteChat(id).catch(() => {});
+  }
+
+  // Puts a question about the clause into the composer, to edit or send.
+  function askAboutClause(row: ReviewRow) {
+    setReviewRow(null);
+    setTab("assistant");
+    setDraft(clauseQuestion(row));
+    setTimeout(() => {
+      const box = document.getElementById("question") as HTMLTextAreaElement | null;
+      box?.focus();
+      box?.setSelectionRange(box.value.length, box.value.length);
+    }, 350); // after the sheet has gone
   }
 
   async function renameChat(id: string, title: string) {
@@ -600,7 +613,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
         </AnimatePresence>
 
         <Sheet open={!!reviewRow} onClose={() => setReviewRow(null)} label="Проверка пункта договора" side>
-          {reviewRow && <ReviewDetail key={reviewRow.clause_number} row={reviewRow} />}
+          {reviewRow && <ReviewDetail key={reviewRow.clause_number} row={reviewRow} onAsk={askAboutClause} />}
         </Sheet>
 
         <Sheet open={!!citation} onClose={closeCitation} label="Текст нормы">
