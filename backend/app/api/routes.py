@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from langfuse import propagate_attributes
 
 from app.accounts import config as accounts_config
@@ -25,6 +27,7 @@ from app.api.schemas import (
     FeedbackRequest,
     ChatPayload,
     ChatRename,
+    ReviewReportRequest,
     ChatResponse,
     ChatSummary,
     MeResponse,
@@ -39,6 +42,7 @@ from app.guardrails.pii import mask_pii
 from app.ingestion.documents import DOCUMENTS, MAX_BYTES, UnsupportedDocument, ingest_document
 from app.mcp_tools.vacation_calculator import calculate_annual_leave
 from app.observability import TRACING_ENABLED, langfuse
+from app.reports.review_pdf import render_review_pdf
 from app.retrieval.config import COLLECTION_NAME
 from app.retrieval.search import CODE_NAMES, dense_only_search, get_article, hybrid_search
 
@@ -317,6 +321,20 @@ def get_chat(chat_id: ChatId, user: User = Depends(current_user)) -> dict:
 @router.put("/chats/{chat_id}", status_code=204)
 def put_chat(chat_id: ChatId, payload: ChatPayload, user: User = Depends(current_user)) -> None:
     accounts.save_chat(user, chat_id, payload.title, payload.chat)
+
+
+@router.post("/reports/contract-review")
+def contract_review_pdf(review: ReviewReportRequest, _: User = Depends(current_user)) -> Response:
+    """The finished review as a PDF to download. Rendered from what the client
+    sends back (the review is not stored), so it costs no model calls."""
+    pdf = render_review_pdf(review.model_dump())
+    stem = re.sub(r"\.[^.]+$", "", review.filename) or "договор"
+    name = quote(f"Проверка договора — {stem}.pdf")
+    return Response(
+        pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=\"contract-review.pdf\"; filename*=UTF-8''{name}"},
+    )
 
 
 @router.patch("/chats/{chat_id}", status_code=204)

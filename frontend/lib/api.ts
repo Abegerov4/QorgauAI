@@ -273,6 +273,17 @@ export const api = {
     }
     throw new ApiError(500, "Соединение прервалось до конца проверки.");
   },
+  /** The finished review as a PDF file, rendered by the server. */
+  reviewPdf: async (review: ContractReview): Promise<Blob> => {
+    let resp: Response;
+    try {
+      resp = await fetch(API_URL + "/reports/contract-review", withAuth(json(review), await authHeaders()));
+    } catch {
+      throw new ApiError(0, `Сервер недоступен (${API_URL}). Попробуйте через минуту.`);
+    }
+    if (!resp.ok) throw new ApiError(resp.status, `Не удалось подготовить PDF (${resp.status}). Попробуйте ещё раз.`);
+    return resp.blob();
+  },
   upload: (file: File) => {
     const form = new FormData();
     form.append("file", file);

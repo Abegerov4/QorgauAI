@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -132,6 +133,31 @@ class MeResponse(BaseModel):
     role: str
     questions_today: int
     daily_limit: int | None = Field(description="None for admins: only the global budget applies.")
+
+
+class ReviewNorm(BaseModel):
+    citation: str = Field(max_length=500)
+    text: str = Field(max_length=5000)
+
+
+class ReviewRowIn(BaseModel):
+    clause_number: str = Field(max_length=40)
+    text: str = Field(max_length=5000)
+    verdict: Literal["violation", "disputed", "ok", "unchecked"]
+    explanation: str = Field("", max_length=3000)
+    fix: str | None = Field(None, max_length=3000)
+    norms: list[ReviewNorm] = Field(default_factory=list, max_length=10)
+    verified: bool | None = None
+
+
+class ReviewReportRequest(BaseModel):
+    """A finished contract review, as the client received it, to print as PDF."""
+
+    filename: str = Field(max_length=300)
+    counts: dict[str, int]
+    clauses: list[ReviewRowIn] = Field(max_length=60)
+    truncated: bool = False
+    disclaimer: str = Field("", max_length=1000)
 
 
 class ChatRename(BaseModel):

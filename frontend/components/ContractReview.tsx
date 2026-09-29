@@ -17,14 +17,13 @@ import {
   EnvelopeIcon,
 } from "@heroicons/react/24/outline";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useState } from "react";
-import type { Clause, ContractReview as Review, ReviewRow, ReviewVerdict } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { api, type Clause, type ContractReview as Review, type ReviewRow, type ReviewVerdict } from "@/lib/api";
 import { citationLabel, parseCitation } from "@/lib/citations";
 import { plural } from "@/lib/labels";
 import { spring, springSnappy } from "@/lib/motion";
 import { employerLetter } from "@/lib/reviewText";
 import { CitationView } from "./CitationView";
-import { ReviewReport } from "./ReviewReport";
 import { Sheet } from "./Sheet";
 
 // The contract as a document with every clause coloured by its verdict:
@@ -63,9 +62,8 @@ type Props = { state: ReviewState; filename: string; onOpen: (row: ReviewRow) =>
 
 export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
   const [problemsOnly, setProblemsOnly] = useState(false);
-  const [printing, setPrinting] = useState(false);
+  const [pdf, setPdf] = useState<"idle" | "busy" | "failed">("idle");
   const [letter, setLetter] = useState(false);
-  const donePrinting = useCallback(() => setPrinting(false), []);
   const running = state.status === "running";
   const byNumber = new Map(state.rows.map((r) => [r.clause_number, r]));
   const counts = state.review?.counts ?? countRows(state.rows);
@@ -113,8 +111,20 @@ export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
             </div>
             {state.review && (
               <div className="flex items-center gap-1.5 sm:ml-auto">
-                <ActionButton onClick={() => setPrinting(true)} icon={<DocumentArrowDownIcon className="size-4" aria-hidden />}>
-                  PDF-отчёт
+                <ActionButton
+                  onClick={async () => {
+                    setPdf("busy");
+                    try {
+                      downloadFile(await api.reviewPdf(state.review!), `Проверка договора — ${filename.replace(/\.[^.]+$/, "")}.pdf`);
+                      setPdf("idle");
+                    } catch {
+                      setPdf("failed");
+                    }
+                  }}
+                  disabled={pdf === "busy"}
+                  icon={<DocumentArrowDownIcon className="size-4" aria-hidden />}
+                >
+                  {pdf === "busy" ? "Готовлю PDF…" : pdf === "failed" ? "PDF: повторить" : "PDF-отчёт"}
                 </ActionButton>
                 {counts.violation + counts.disputed > 0 && (
                   <ActionButton onClick={() => setLetter(true)} icon={<EnvelopeIcon className="size-4" aria-hidden />}>
@@ -151,7 +161,6 @@ export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
         </footer>
       )}
 
-      {printing && state.review && <ReviewReport review={state.review} onDone={donePrinting} />}
       <Sheet open={letter} onClose={() => setLetter(false)} label="Письмо работодателю" side>
         {letter && state.review && <LetterView review={state.review} />}
       </Sheet>
@@ -159,11 +168,31 @@ export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
   );
 }
 
-function ActionButton({ onClick, icon, children }: { onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+function downloadFile(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000); // Safari reads the blob after click() returns
+}
+
+function ActionButton({
+  onClick,
+  icon,
+  disabled,
+  children,
+}: {
+  onClick: () => void;
+  icon: React.ReactNode;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <button
       onClick={onClick}
-      className="pressable t-caption inline-flex items-center gap-1.5 rounded-full border border-hairline bg-surface px-3 py-1 font-semibold text-text-2 hover:bg-surface-2 hover:text-text"
+      disabled={disabled}
+      className="pressable t-caption inline-flex items-center gap-1.5 rounded-full border border-hairline bg-surface px-3 py-1 font-semibold text-text-2 hover:bg-surface-2 hover:text-text disabled:opacity-60"
     >
       {icon}
       {children}
@@ -181,12 +210,7 @@ function LetterView({ review }: { review: Review }) {
     return () => clearTimeout(t);
   }, [copied]);
 
-  function download() {
-    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
-    const a = Object.assign(document.createElement("a"), { href: url, download: "Письмо работодателю.txt" });
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  const download = () => downloadFile(new Blob([text], { type: "text/plain;charset=utf-8" }), "Письмо работодателю.txt");
 
   return (
     <div className="pb-2">
