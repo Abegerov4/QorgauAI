@@ -143,6 +143,18 @@ def test_finalize_keeps_only_verified_claims():
     assert final["sources"] == ["ТК, Статья 88"]
 
 
+def test_finalize_passes_follow_ups_only_with_an_answer():
+    draft = {"claims": [{"text": "24 дня.", "evidence_ids": ["E1"]}], "missing_info": [], "recommend_lawyer": False,
+             "follow_up_questions": [" А если работа вредная? ", "", "Можно ли разделить отпуск?", "Третий?", "Четвёртый?"]}
+    evidence = [{"id": "E1", "citation": "ТК, Статья 88", "text": "24 дня"}]
+    ok = {"all_supported": True, "checks": [{"claim_index": 0, "supported": True, "confidence": 0.9, "explanation": ""}]}
+    final = asyncio.run(graph.finalize(_state(summary={"in_scope": True}, evidence=evidence, draft=draft, verification=ok)))["final"]
+    assert final["follow_ups"] == ["А если работа вредная?", "Можно ли разделить отпуск?", "Третий?"]
+    ok["checks"][0]["supported"] = False  # nothing confirmed: a refusal suggests nothing
+    final = asyncio.run(graph.finalize(_state(summary={"in_scope": True}, evidence=evidence, draft=draft, verification=ok)))["final"]
+    assert (final["status"], final["follow_ups"]) == ("refused", [])
+
+
 def test_finalize_refuses_out_of_scope():
     final = asyncio.run(graph.finalize(_state(summary={"in_scope": False, "missing_info": []})))["final"]
     assert final["status"] == "refused"

@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "motion/react";
+import { ChatBubbleLeftRightIcon } from "@heroicons/react/16/solid";
 import { Bars3Icon, PlusIcon } from "@heroicons/react/20/solid";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type AgentEvent, type AskResponse, type ChatSummary, type Clause, type DocumentResponse, type Me, type ReviewRow } from "@/lib/api";
@@ -184,7 +185,11 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
       api
         .saveChat(id, title, chat)
         .then(() =>
-          setChats((cs) => [{ id, title, updated_at: new Date().toISOString() }, ...(cs ?? []).filter((c) => c.id !== id)]),
+          setChats((cs) => {
+            const prev = (cs ?? []).find((c) => c.id === id);
+            const kept = prev?.renamed ? { title: prev.title, renamed: true } : { title }; // the server keeps a chosen name too
+            return [{ id, ...kept, updated_at: new Date().toISOString() }, ...(cs ?? []).filter((c) => c.id !== id)];
+          }),
         )
         .catch(() => {});
     };
@@ -239,6 +244,15 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
       showChat(`web-${uid()}`, null);
     }
     await api.deleteChat(id).catch(() => {});
+  }
+
+  async function renameChat(id: string, title: string) {
+    setChats((cs) => (cs ?? []).map((c) => (c.id === id ? { ...c, title, renamed: true } : c)));
+    try {
+      await api.renameChat(id, title);
+    } catch {
+      api.chats().then(setChats).catch(() => {}); // back to what the server has
+    }
   }
 
   const rate = useCallback(async (itemId: string, traceId: string, helpful: boolean, comment?: string) => {
@@ -386,6 +400,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
         onDetach={() => setAttachment(null)}
         attachment={attachment}
         busy={busy}
+        onStop={() => abort.current?.abort()}
         placeholder={attachment ? "Что проверить в договоре?" : "Спросите о трудовых правах"}
       />
     </motion.div>
@@ -400,6 +415,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
         onSelect={openChat}
         onNew={newChat}
         onDelete={deleteChat}
+        onRename={renameChat}
         user={user}
         me={me}
         open={drawer}
@@ -502,6 +518,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
                           onRate={rate}
                           onCite={openCitation}
                           onCancel={() => abort.current?.abort()}
+                          onAsk={i === items.length - 1 ? (q) => send(q) : undefined}
                         />
                       </motion.div>
                     ))}
@@ -611,9 +628,11 @@ type ThreadItemProps = {
   onCite: (c: Citation) => void;
   onCancel: () => void;
   onRate: (itemId: string, traceId: string, helpful: boolean, comment?: string) => void;
+  /** Only for the latest answer: asks one of its suggested follow-ups. */
+  onAsk?: (question: string) => void;
 };
 
-function ThreadItem({ item, question, reviewed, busy, onReview, onOpenReview, onCite, onCancel, onRate }: ThreadItemProps) {
+function ThreadItem({ item, question, reviewed, busy, onReview, onOpenReview, onCite, onCancel, onRate, onAsk }: ThreadItemProps) {
   switch (item.kind) {
     case "question":
       return (
@@ -645,15 +664,20 @@ function ThreadItem({ item, question, reviewed, busy, onReview, onOpenReview, on
       );
     case "answer":
       return (
-        <AnswerCard
-          answer={item.answer}
-          seconds={item.seconds}
-          onCite={onCite}
-          question={question}
-          fresh={!!item.fresh}
-          feedback={item.feedback}
-          onRate={(helpful, comment) => item.answer.trace_id && onRate(item.id, item.answer.trace_id, helpful, comment)}
-        />
+        <>
+          <AnswerCard
+            answer={item.answer}
+            seconds={item.seconds}
+            onCite={onCite}
+            question={question}
+            fresh={!!item.fresh}
+            feedback={item.feedback}
+            onRate={(helpful, comment) => item.answer.trace_id && onRate(item.id, item.answer.trace_id, helpful, comment)}
+          />
+          {onAsk && !!item.answer.follow_ups?.length && (
+            <FollowUps questions={item.answer.follow_ups} onAsk={onAsk} disabled={busy} />
+          )}
+        </>
       );
     case "error":
       return (
@@ -723,6 +747,30 @@ function IntroCompact() {
     <p className="t-caption mb-6 border-b border-hairline pb-4 text-text-3">
       Отвечаю по Конституции и Трудовому кодексу РК. Каждое утверждение проверяет второй агент.
     </p>
+  );
+}
+
+function FollowUps({ questions, onAsk, disabled }: { questions: string[]; onAsk: (q: string) => void; disabled: boolean }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ ...spring, delay: 0.4 }}
+      className="mt-3 flex flex-col items-start gap-1.5"
+    >
+      <p className="t-caption px-1 text-text-3">Можно спросить дальше</p>
+      {questions.map((q) => (
+        <button
+          key={q}
+          onClick={() => onAsk(q)}
+          disabled={disabled}
+          className="pressable t-body inline-flex max-w-full items-start gap-2 rounded-2xl border border-hairline bg-surface px-3.5 py-2 text-left text-text-2 hover:bg-surface-2 hover:text-text disabled:opacity-50"
+        >
+          <ChatBubbleLeftRightIcon className="mt-0.5 size-4 shrink-0 text-accent-ink" aria-hidden />
+          {q}
+        </button>
+      ))}
+    </motion.div>
   );
 }
 

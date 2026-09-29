@@ -24,6 +24,7 @@ from app.api.schemas import (
     DocumentResponse,
     FeedbackRequest,
     ChatPayload,
+    ChatRename,
     ChatResponse,
     ChatSummary,
     MeResponse,
@@ -316,6 +317,14 @@ def get_chat(chat_id: ChatId, user: User = Depends(current_user)) -> dict:
 @router.put("/chats/{chat_id}", status_code=204)
 def put_chat(chat_id: ChatId, payload: ChatPayload, user: User = Depends(current_user)) -> None:
     accounts.save_chat(user, chat_id, payload.title, payload.chat)
+
+
+@router.patch("/chats/{chat_id}", status_code=204)
+def rename_chat(chat_id: ChatId, payload: ChatRename, user: User = Depends(current_user)) -> None:
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="Название не может быть пустым.")
+    accounts.rename_chat(user, chat_id, title)
 
 
 @router.delete("/chats/{chat_id}", status_code=204)

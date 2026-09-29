@@ -13,11 +13,13 @@ type Props = {
   attachment: { name: string; uploading: boolean } | null;
   busy: boolean;
   placeholder: string;
+  /** While an answer or a review runs: stops it. */
+  onStop?: () => void;
 };
 
 export const ACCEPT = "application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png";
 
-export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attachment, busy, placeholder }: Props) {
+export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attachment, busy, placeholder, onStop }: Props) {
   const area = useRef<HTMLTextAreaElement>(null);
   const file = useRef<HTMLInputElement>(null);
   const canSend = !busy && !attachment?.uploading && (value.trim().length > 0 || !!attachment);
@@ -112,16 +114,27 @@ export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attach
           maxLength={4000}
           className="t-body min-h-10 flex-1 resize-none bg-transparent py-2 outline-none placeholder:text-text-3"
         />
-        <button
-          onClick={onSubmit}
-          disabled={!canSend}
-          className="pressable grid size-10 shrink-0 place-items-center rounded-full bg-accent text-white disabled:bg-surface-2 disabled:text-text-3"
-          aria-label="Отправить"
-        >
-          <svg width="14" height="16" viewBox="0 0 14 16" fill="none" aria-hidden>
-            <path d="M7 14.5V2M1.5 7.5L7 2l5.5 5.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+        {busy && onStop ? (
+          <button
+            onClick={onStop}
+            className="pressable grid size-10 shrink-0 place-items-center rounded-full bg-text text-bg"
+            aria-label="Остановить"
+            title="Остановить"
+          >
+            <span className="size-3 rounded-[3px] bg-current" aria-hidden />
+          </button>
+        ) : (
+          <button
+            onClick={onSubmit}
+            disabled={!canSend}
+            className="pressable grid size-10 shrink-0 place-items-center rounded-full bg-accent text-white disabled:bg-surface-2 disabled:text-text-3"
+            aria-label="Отправить"
+          >
+            <svg width="14" height="16" viewBox="0 0 14 16" fill="none" aria-hidden>
+              <path d="M7 14.5V2M1.5 7.5L7 2l5.5 5.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );

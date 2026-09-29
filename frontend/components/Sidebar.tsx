@@ -5,6 +5,8 @@ import {
   ChartBarIcon,
   ChevronDoubleLeftIcon,
   ChevronUpDownIcon,
+  MagnifyingGlassIcon,
+  PencilIcon,
   TrashIcon,
   XMarkIcon,
 } from "@heroicons/react/20/solid";
@@ -34,6 +36,7 @@ type Props = {
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => void;
   user: SignedInUser | null;
   me: Me | null;
 };
@@ -120,12 +123,16 @@ function SidebarBody({
   onSelect,
   onNew,
   onDelete,
+  onRename,
   user,
   me,
   onHide,
   onClose,
 }: Props & { onHide?: () => void; onClose?: () => void }) {
-  const groups = chats ? groupChats(chats) : [];
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const found = chats && q ? chats.filter((c) => c.title.toLowerCase().includes(q)) : chats;
+  const groups = found ? groupChats(found) : [];
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-15 shrink-0 items-center gap-2 px-4">
@@ -151,6 +158,29 @@ function SidebarBody({
           <PencilSquareIcon className="size-[18px]" aria-hidden />
           Новый чат
         </button>
+        {!!chats?.length && (
+          <label className="mt-2 flex items-center gap-2 rounded-xl bg-surface-2/70 px-3 py-1.5 focus-within:bg-surface-2">
+            <MagnifyingGlassIcon className="size-4 shrink-0 text-text-3" aria-hidden />
+            <span className="sr-only">Поиск по чатам</span>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && query) {
+                  e.stopPropagation(); // clear first; a second Esc closes the drawer
+                  setQuery("");
+                }
+              }}
+              placeholder="Поиск по чатам"
+              className="t-body min-w-0 flex-1 bg-transparent outline-none placeholder:text-text-3"
+            />
+            {query && (
+              <button onClick={() => setQuery("")} className="text-text-3 hover:text-text" aria-label="Очистить поиск">
+                <XMarkIcon className="size-4" />
+              </button>
+            )}
+          </label>
+        )}
       </div>
 
       <nav className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-4" aria-label="Чаты">
@@ -161,14 +191,23 @@ function SidebarBody({
             ))}
           </div>
         ) : groups.length === 0 ? (
-          <p className="t-caption px-2 pt-3 text-text-3">Здесь появятся ваши чаты: по одному на каждую тему.</p>
+          <p className="t-caption px-2 pt-3 text-text-3">
+            {q ? `Нет чатов с «${query.trim()}» в названии.` : "Здесь появятся ваши чаты: по одному на каждую тему."}
+          </p>
         ) : (
           groups.map((g) => (
             <section key={g.label} className="mt-3 first:mt-1">
               <h3 className="t-eyebrow px-2 pb-1.5 text-text-3">{g.label}</h3>
               <ul className="relative ml-2 border-l border-hairline">
                 {g.chats.map((c) => (
-                  <ChatRow key={c.id} chat={c} active={c.id === activeId} onSelect={onSelect} onDelete={onDelete} />
+                  <ChatRow
+                    key={c.id}
+                    chat={c}
+                    active={c.id === activeId}
+                    onSelect={onSelect}
+                    onDelete={onDelete}
+                    onRename={onRename}
+                  />
                 ))}
               </ul>
             </section>
@@ -195,13 +234,49 @@ function ChatRow({
   active,
   onSelect,
   onDelete,
+  onRename,
 }: {
   chat: ChatSummary;
   active: boolean;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => void;
 }) {
   const [confirm, setConfirm] = useState(false);
+  const [editing, setEditing] = useState(false);
+
+  function finish(save: boolean, value: string) {
+    setEditing(false);
+    const title = value.trim().slice(0, 200);
+    if (save && title && title !== chat.title) onRename(chat.id, title);
+  }
+
+  if (editing) {
+    return (
+      <li className="relative">
+        <label className="sr-only" htmlFor={`rename-${chat.id}`}>
+          Название чата
+        </label>
+        <input
+          id={`rename-${chat.id}`}
+          defaultValue={chat.title}
+          maxLength={200}
+          autoFocus
+          onFocus={(e) => e.currentTarget.select()}
+          onBlur={(e) => finish(true, e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") finish(true, e.currentTarget.value);
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              finish(false, "");
+            }
+          }}
+          className="ml-2 block w-[calc(100%-0.5rem)] rounded-xl border border-accent bg-surface py-[7px] pr-2 pl-2.5 text-[0.9375rem] leading-snug text-text outline-none"
+        />
+      </li>
+    );
+  }
+
   return (
     <li className="group relative" onMouseLeave={() => setConfirm(false)}>
       {active && (
@@ -216,7 +291,7 @@ function ChatRow({
         onClick={() => onSelect(chat.id)}
         aria-current={active ? "page" : undefined}
         title={chat.title}
-        className={`ml-2 block w-[calc(100%-0.5rem)] truncate rounded-xl py-2 pr-9 pl-2.5 text-[0.9375rem] leading-snug text-left transition-colors ${
+        className={`ml-2 block w-[calc(100%-0.5rem)] truncate rounded-xl py-2 pr-9 pl-2.5 group-hover:pr-16 [@media(hover:none)]:pr-16 text-[0.9375rem] leading-snug text-left transition-colors ${
           active ? "bg-surface-2 font-medium text-text" : "text-text-2 hover:bg-surface-2/60 hover:text-text"
         }`}
       >
@@ -232,14 +307,24 @@ function ChatRow({
             Удалить
           </button>
         ) : (
-          <button
-            onClick={() => setConfirm(true)}
-            className="pressable grid size-7 place-items-center rounded-lg text-text-3 opacity-0 group-hover:opacity-100 hover:bg-red-soft hover:text-red focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-            aria-label={`Удалить чат «${chat.title}»`}
-            title="Удалить чат"
-          >
-            <TrashIcon className="size-4" />
-          </button>
+          <>
+            <button
+              onClick={() => setEditing(true)}
+              className="pressable grid size-7 place-items-center rounded-lg text-text-3 opacity-0 group-hover:opacity-100 hover:bg-surface hover:text-text focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+              aria-label={`Переименовать чат «${chat.title}»`}
+              title="Переименовать"
+            >
+              <PencilIcon className="size-3.5" />
+            </button>
+            <button
+              onClick={() => setConfirm(true)}
+              className="pressable grid size-7 place-items-center rounded-lg text-text-3 opacity-0 group-hover:opacity-100 hover:bg-red-soft hover:text-red focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+              aria-label={`Удалить чат «${chat.title}»`}
+              title="Удалить чат"
+            >
+              <TrashIcon className="size-4" />
+            </button>
+          </>
         )}
       </div>
     </li>

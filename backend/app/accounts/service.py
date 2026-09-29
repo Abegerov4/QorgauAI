@@ -77,9 +77,12 @@ def list_chats(user: User, limit: int = 100) -> list[dict]:
     c = db.conversations.c
     with db.engine().connect() as conn:
         rows = conn.execute(
-            select(c.id, c.title, c.updated_at).where(c.user_email == user.email).order_by(c.updated_at.desc()).limit(limit)
+            select(c.id, c.title, c.updated_at, c.renamed)
+            .where(c.user_email == user.email)
+            .order_by(c.updated_at.desc())
+            .limit(limit)
         ).all()
-    return [{"id": r.id, "title": r.title, "updated_at": r.updated_at} for r in rows]
+    return [{"id": r.id, "title": r.title, "updated_at": r.updated_at, "renamed": bool(r.renamed)} for r in rows]
 
 
 def load_chat(user: User, chat_id: str) -> dict:
@@ -96,17 +99,29 @@ def save_chat(user: User, chat_id: str, title: str, chat: dict) -> None:
         raise HTTPException(status_code=413, detail="История слишком большая. Начните новый чат.")
     t, c = db.conversations, db.conversations.c
     with db.engine().begin() as conn:
-        owner = conn.execute(select(c.user_email).where(c.id == chat_id)).scalar()
-        if owner is None:
+        row = conn.execute(select(c.user_email, c.renamed).where(c.id == chat_id)).first()
+        if row is None:
             conn.execute(
                 insert(t).values(
                     id=chat_id, user_email=user.email, title=title, items=chat, created_at=db.now(), updated_at=db.now()
                 )
             )
-        elif owner == user.email:
-            conn.execute(update(t).where(c.id == chat_id).values(title=title, items=chat, updated_at=db.now()))
+        elif row.user_email == user.email:
+            values = {"items": chat, "updated_at": db.now()} | ({} if row.renamed else {"title": title})
+            conn.execute(update(t).where(c.id == chat_id).values(**values))
         else:  # someone else's id: same answer as a missing chat
             raise HTTPException(status_code=404, detail="Чат не найден.")
+
+
+def rename_chat(user: User, chat_id: str, title: str) -> None:
+    """A title the user chose; later saves of the chat keep it."""
+    c = db.conversations.c
+    with db.engine().begin() as conn:
+        done = conn.execute(
+            update(db.conversations).where(c.id == chat_id, c.user_email == user.email).values(title=title, renamed=True)
+        )
+    if not done.rowcount:
+        raise HTTPException(status_code=404, detail="Чат не найден.")
 
 
 def delete_chat(user: User, chat_id: str) -> None:

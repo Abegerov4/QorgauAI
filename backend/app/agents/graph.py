@@ -337,8 +337,10 @@ async def finalize(state: AgentState) -> AgentState:
         else:
             status = "refused"
             answer = "Не удалось подтвердить ответ нормами Конституции и Трудового кодекса РК, поэтому я не буду его давать."
+        follow_ups = [q.strip()[:150] for q in draft.get("follow_up_questions") or [] if q.strip()][:3] if kept else []
         final = FinalAnswer(status=status, answer=answer, claims=kept, sources=sources, missing_info=missing,
-                            removed_claims=removed, recommend_lawyer=bool(draft["recommend_lawyer"]), disclaimer=DISCLAIMER)
+                            removed_claims=removed, recommend_lawyer=bool(draft["recommend_lawyer"]), disclaimer=DISCLAIMER,
+                            follow_ups=follow_ups)
 
     langfuse.update_current_span(output=final.model_dump())
     return {"final": final.model_dump(), "path": [*state["path"], "finalize"]}

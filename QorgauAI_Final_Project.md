@@ -200,7 +200,7 @@ Langfuse Cloud, плюс отдельный compose самостоятельно
 | Деплой | Railway, автодеплой из `main`; Dockerfile frontend/backend, `.railwayignore`, настройка origins, Google callback и общих секретов |
 | Docker | Qdrant + backend + frontend; `index_corpus --if-empty` при старте; reranker/torch вынесены из основного образа |
 | CI | GitHub Actions: индексирование Qdrant, pytest без reranker, hybrid Recall@5 ≥ 0.85, frontend lint и build |
-| Тесты | **90 тестов** на 28.09.2026, CI на `main` зелёный; проверены граф, PII, метаданные/MCP в тестовой БД, ingestion, review, аккаунты, лимиты и метрики |
+| Тесты | **92 теста** на 29.09.2026, CI на `main` зелёный; проверены граф, PII, метаданные/MCP в тестовой БД, ingestion, review, аккаунты, лимиты и метрики |
 
 Часть тестов требует индексированного Qdrant, ключа эмбеддингов и весов reranker; команды приведены в EVALS. На 28.09.2026 CI на `main` зелёный, а Railway-стенд отвечает `/health` со статусом `ok`.
 

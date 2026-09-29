@@ -114,6 +114,7 @@ class ChatSummary(BaseModel):
     id: str
     title: str
     updated_at: datetime
+    renamed: bool = False
 
 
 class ChatPayload(BaseModel):
@@ -131,6 +132,10 @@ class MeResponse(BaseModel):
     role: str
     questions_today: int
     daily_limit: int | None = Field(description="None for admins: only the global budget applies.")
+
+
+class ChatRename(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
 
 
 class AdminUserUpdate(BaseModel):

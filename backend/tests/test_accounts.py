@@ -216,7 +216,7 @@ def test_blocked_user_is_locked_out_but_admin_cannot_be_blocked(monkeypatch):
     assert client.patch(f"/admin/users/{USER.email}", json={"blocked": None}, headers=token(ADMIN.email)).status_code == 422
 
 
-def test_users_table_from_before_the_admin_columns_gets_them(tmp_path):
+def test_tables_from_before_later_columns_get_them(tmp_path):
     from sqlalchemy import Column, DateTime, MetaData, String, Table, create_engine, inspect
 
     url = f"sqlite:///{tmp_path / 'old.db'}"
@@ -225,7 +225,24 @@ def test_users_table_from_before_the_admin_columns_gets_them(tmp_path):
     with create_engine(url).begin() as conn:
         old.create(conn)
         conn.execute(old.insert().values(email=USER.email, name="Old", created_at=db.now(), last_seen_at=db.now()))
+    old_chats = Table("conversations", MetaData(), Column("id", String(64), primary_key=True))
+    with create_engine(url).begin() as conn:
+        old_chats.create(conn)
     db.reset_engine(url)
     assert {"blocked", "daily_limit"} <= {c["name"] for c in inspect(db.engine()).get_columns("users")}
+    assert "renamed" in {c["name"] for c in inspect(db.engine()).get_columns("conversations")}
     row = service.admin_users(USER.email)[0]
     assert (row["blocked"], row["daily_limit"], row["question_limit"]) == (False, None, 3)
+
+
+def test_renamed_chat_keeps_its_title_on_later_saves(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_REQUIRED", True)
+    headers = token(USER.email)
+    chat = {"sessionId": "web-r", "items": [], "clauses": []}
+    assert client.put("/chats/web-r", json={"title": "Первый вопрос", "chat": chat}, headers=headers).status_code == 204
+    assert client.patch("/chats/web-r", json={"title": "  Отпуск  "}, headers=headers).status_code == 204
+    assert client.put("/chats/web-r", json={"title": "Первый вопрос", "chat": chat}, headers=headers).status_code == 204
+    assert [c["title"] for c in client.get("/chats", headers=headers).json()] == ["Отпуск"]
+    assert client.patch("/chats/web-r", json={"title": "   "}, headers=headers).status_code == 422
+    # someone else's chat looks missing
+    assert client.patch("/chats/web-r", json={"title": "Чужой"}, headers=token(ADMIN.email)).status_code == 404

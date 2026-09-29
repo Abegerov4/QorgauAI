@@ -27,6 +27,9 @@ class Draft(BaseModel):
     claims: list[DraftClaim]
     missing_info: list[str]
     recommend_lawyer: bool = Field(description="True, если спор, суд или высокая цена ошибки.")
+    follow_up_questions: list[str] = Field(
+        description="2–3 коротких вопроса, которые пользователь логично задаст следом, по Трудовому кодексу или Конституции РК."
+    )
 
 
 class ClaimCheck(BaseModel):
@@ -54,3 +57,4 @@ class FinalAnswer(BaseModel):
     removed_claims: list[str] = Field(description="Утверждения, которые Verifier не подтвердил и которые не показаны пользователю.")
     recommend_lawyer: bool
     disclaimer: str
+    follow_ups: list[str] = Field(default_factory=list, description="Suggested next questions; empty for a refusal.")

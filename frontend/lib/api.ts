@@ -31,12 +31,14 @@ export type AskResponse = {
   checked_claims: number;
   supported_claims: number;
   trace_id: string | null;
+  /** Suggested next questions; missing in answers saved before they existed. */
+  follow_ups?: string[];
 };
 
 export type Me = { email: string; name: string | null; role: "user" | "admin"; questions_today: number; daily_limit: number | null };
 
 /** A saved conversation in the sidebar; updated_at is UTC without a zone. */
-export type ChatSummary = { id: string; title: string; updated_at: string };
+export type ChatSummary = { id: string; title: string; updated_at: string; renamed?: boolean };
 
 export type AdminStats = {
   today: { spent_usd: number; budget_usd: number; per_user_limit: number; users: { email: string; questions: number; cost_usd: number }[] };
@@ -287,6 +289,8 @@ export const api = {
   chat: <T>(id: string) => request<{ id: string; title: string; chat: T }>(`/chats/${encodeURIComponent(id)}`),
   saveChat: (id: string, title: string, chat: unknown) =>
     request<void>(`/chats/${encodeURIComponent(id)}`, { ...json({ title, chat }), method: "PUT" }),
+  renameChat: (id: string, title: string) =>
+    request<void>(`/chats/${encodeURIComponent(id)}`, { ...json({ title }), method: "PATCH" }),
   deleteChat: (id: string) => request<void>(`/chats/${encodeURIComponent(id)}`, { method: "DELETE" }),
   adminStats: () => request<AdminStats>("/admin/stats"),
   adminUsers: () => request<{ default_limit: number; users: AdminUser[] }>("/admin/users"),

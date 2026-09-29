@@ -79,6 +79,8 @@ conversations = Table(
     Column("items", JSON, nullable=False),
     Column("created_at", DateTime(), nullable=False),
     Column("updated_at", DateTime(), nullable=False, index=True),
+    # Renamed by the user: saves keep that title instead of the first question.
+    Column("renamed", Boolean, nullable=False, default=False, server_default=text("FALSE")),
 )
 
 # Before conversations: one current chat per user. Only read once, to carry
@@ -107,19 +109,24 @@ def init_db() -> None:
 
         Path(config.DATABASE_URL.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     metadata.create_all(engine())
-    _add_user_columns()
+    _add_columns()
     _migrate_legacy_chats()
 
 
-def _add_user_columns() -> None:
-    """create_all never alters an existing table: add the admin columns to a
-    users table created before them."""
+# Columns added after the first deploy. create_all never alters an existing
+# table, so they are added here to tables created before them.
+_LATER_COLUMNS = [
+    ("users", "blocked", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("users", "daily_limit", "INTEGER"),
+    ("conversations", "renamed", "BOOLEAN NOT NULL DEFAULT FALSE"),
+]
+
+
+def _add_columns() -> None:
     with engine().begin() as conn:
-        have = {c["name"] for c in inspect(conn).get_columns("users")}
-        if "blocked" not in have:
-            conn.execute(text("ALTER TABLE users ADD COLUMN blocked BOOLEAN NOT NULL DEFAULT FALSE"))
-        if "daily_limit" not in have:
-            conn.execute(text("ALTER TABLE users ADD COLUMN daily_limit INTEGER"))
+        for table, column, ddl in _LATER_COLUMNS:
+            if column not in {c["name"] for c in inspect(conn).get_columns(table)}:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
 
 
 def _migrate_legacy_chats() -> None:

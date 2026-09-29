@@ -12,7 +12,7 @@ Agentic RAG на LangGraph: агент ищет нормы через MCP-инс
 ![correctness](https://img.shields.io/badge/correctness-0.93%20vs%200.71%20у%20RAG-2e7d32)
 ![source recall](https://img.shields.io/badge/нужные%20статьи%20найдены-98%25-2e7d32)
 ![injection](https://img.shields.io/badge/prompt%20injection-0%20успешных%20атак-2e7d32)
-![tests](https://img.shields.io/badge/тесты-90-2e7d32) [![CI](https://github.com/Abegerov4/QorgauAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Abegerov4/QorgauAI/actions/workflows/ci.yml)
+![tests](https://img.shields.io/badge/тесты-92-2e7d32) [![CI](https://github.com/Abegerov4/QorgauAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Abegerov4/QorgauAI/actions/workflows/ci.yml)
 
 </div>
 
@@ -82,7 +82,8 @@ Agentic RAG на LangGraph: агент ищет нормы через MCP-инс
 
 ### 5. Как в настоящем продукте
 
-- **Вход через Google**, у каждого пользователя своя история чатов на сервере.
+- **Вход через Google**, у каждого пользователя своя история чатов на сервере: с поиском и переименованием.
+- **Удобный чат:** кнопка «Остановить» во время ответа и 2–3 похожих вопроса под ответом, чтобы спросить дальше в один клик.
 - **Лимиты:** 20 вопросов в день на человека и общий дневной бюджет в долларах, чтобы никто не сжёг ключ OpenAI.
 - **👍 / 👎 под каждым ответом.** Оценка уходит в Langfuse как score на трассу этого ответа, а отрицательные оценки с комментариями попадают на страницу статистики — готовые кандидаты в golden dataset.
 - **Админка:** таблица всех пользователей с поиском и сортировкой, вопросы каждого со статусом, оценкой и ссылкой на трассу, личный дневной лимит и блокировка.
@@ -232,7 +233,7 @@ npm install && npm run dev
 
 ```bash
 cd backend
-.venv/bin/python -m pytest -q                                 # 90 тестов, без вызовов LLM; нужен Qdrant
+.venv/bin/python -m pytest -q                                 # 92 теста, без вызовов LLM; нужен Qdrant
 .venv/bin/python -m app.eval.retrieval                        # Recall@5 поиска, копейки
 .venv/bin/python -m app.eval.run --pipelines A B C --budget 3 # полный A/B/C, ~$1.75
 .venv/bin/python -m app.eval.contract_review                  # проверка договоров, ~$0.16
@@ -240,7 +241,7 @@ cd backend
 
 CI на каждый push гоняет тесты бэкенда, оценку поиска (падает, если Recall@5 гибридного поиска ниже 0.85), линт и сборку фронтенда.
 
-На 28.09.2026 — 90 тестов, CI на `main` зелёный. Два поисковых теста обращаются к OpenAI за эмбеддингами, остальные работают без сети. Команды и зависимости — в [EVALS.md](EVALS.md).
+На 29.09.2026 — 92 теста, CI на `main` зелёный. Два поисковых теста обращаются к OpenAI за эмбеддингами, остальные работают без сети. Команды и зависимости — в [EVALS.md](EVALS.md).
 
 ## Структура
 
