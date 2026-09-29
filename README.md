@@ -12,7 +12,9 @@ Agentic RAG на LangGraph: агент ищет нормы через MCP-инс
 ![correctness](https://img.shields.io/badge/correctness-0.93%20vs%200.71%20у%20RAG-2e7d32)
 ![source recall](https://img.shields.io/badge/нужные%20статьи%20найдены-98%25-2e7d32)
 ![injection](https://img.shields.io/badge/prompt%20injection-0%20успешных%20атак-2e7d32)
-![tests](https://img.shields.io/badge/тесты-95-2e7d32) [![CI](https://github.com/Abegerov4/QorgauAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Abegerov4/QorgauAI/actions/workflows/ci.yml)
+![tests](https://img.shields.io/badge/тесты-95-2e7d32)
+
+**[▶ Открыть демо: qorgau-ai.up.railway.app](https://qorgau-ai.up.railway.app)**
 
 </div>
 
