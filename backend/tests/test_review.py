@@ -119,8 +119,10 @@ def fake_llm(monkeypatch):
             assert "Испытательный срок шесть месяцев" in messages[1]["content"]
             return ReviewDraft(verdicts=[_v("3.3", "violation", ["E1"]), _v("8.1", "violation", ["E2"]), _v("10.2", "ok"), _v("11.1", "ok")])
         assert schema is ReviewVerification
-        flagged = messages[1]["content"]
+        content = messages[1]["content"]
+        flagged = content.split("Вердикты:")[1]
         assert "Пункт 3.3" in flagged and "Пункт 10.2" not in flagged  # only red and yellow are re-checked
+        assert "Пункт 10.2" in content  # but the whole contract is there for context
         return ReviewVerification(checks=[VerdictCheck(clause_number=n, supported=True, explanation="ok") for n in ("3.3", "8.1")])
 
     def fake_article(code, number):
@@ -186,3 +188,49 @@ def test_a_zip_that_is_not_word_is_rejected():
         z.writestr("xl/workbook.xml", "<x/>")
     with pytest.raises(UnsupportedDocument):
         documents.detect_kind(buf.getvalue())
+
+
+def test_a_failing_verifier_downgrades_reds_instead_of_failing_the_review(fake_llm, monkeypatch):
+    real_parse = review.parse
+
+    async def verifier_fails(node, messages, schema, *, name):
+        if schema is ReviewVerification:
+            raise ValueError("check-verdicts: model returned no parsable output")
+        return await real_parse(node, messages, schema, name=name)
+
+    monkeypatch.setattr(review, "parse", verifier_fails)
+    result = asyncio.run(review.review_document(_document()))
+    assert result["counts"] == {"violation": 0, "disputed": 2, "ok": 2, "unchecked": 0}
+    assert all(r["verified"] is False for r in result["clauses"] if r["verdict"] == "disputed")
+
+
+def test_long_review_calls_get_their_own_limits():
+    from app.agents import config as agents
+
+    # One call rules on every clause: it must not hit the 40 s chat timeout,
+    # and the verifier's reasoning must leave room for the answer.
+    assert agents.REVIEWER.timeout > 60 and agents.REVIEWER.retries == 0
+    assert agents.REVIEW_VERIFIER.model == agents.VERIFIER.model
+    assert agents.REVIEW_VERIFIER.max_completion_tokens >= 4 * agents.VERIFIER.max_completion_tokens
+    assert agents.GENERATOR.timeout == 40
+
+
+def test_running_out_of_tokens_falls_back_to_the_next_model(monkeypatch):
+    import openai
+
+    from app.agents import llm
+    from app.agents.config import NodeModel
+
+    node = NodeModel("gpt-5.5", None, "low", 100, ("gpt-5.4",))
+    monkeypatch.setattr(llm, "_client_for", lambda node: None)
+    monkeypatch.setattr(llm.cost, "record", lambda model, usage: 0.0)
+    tried = []
+
+    async def call(client, params):
+        tried.append(params["model"])
+        if params["model"] == "gpt-5.5":
+            raise openai.LengthFinishReasonError(completion=SimpleNamespace(usage=None))
+        return SimpleNamespace(model=params["model"], usage=None)
+
+    resp = asyncio.run(llm._with_fallback(node, call))
+    assert tried == ["gpt-5.5", "gpt-5.4"] and resp.model == "gpt-5.4"

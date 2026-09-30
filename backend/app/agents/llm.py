@@ -19,16 +19,24 @@ T = TypeVar("T", bound=BaseModel)
 
 # Fallback can't fix bad credentials or a missing account permission.
 _NO_FALLBACK = (openai.AuthenticationError, openai.PermissionDeniedError)
+# Worth trying the next model: the API failed, or the model ran out of tokens
+# (a reasoning model can spend the whole budget before answering).
+_FALLBACK_ON = (openai.APIError, openai.LengthFinishReasonError)
 
 
 @lru_cache(maxsize=1)
 def _client():
     from langfuse.openai import AsyncOpenAI
 
-    # Short timeout + one retry: a stalled call (one planner step once took
-    # 129 s for 23 output tokens) should fail over to the fallback model
-    # quickly instead of the SDK's default 10 min timeout and 2 retries.
-    return AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=40, max_retries=1)
+    return AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+
+def _client_for(node: NodeModel):
+    # Short timeout + one retry by default: a stalled call (one planner step
+    # once took 129 s for 23 output tokens) should fail over to the fallback
+    # model quickly instead of the SDK's default 10 min timeout and 2 retries.
+    # Nodes with long outputs set their own limits in config.
+    return _client().with_options(timeout=node.timeout, max_retries=node.retries)
 
 
 def _params(node: NodeModel, model: str) -> dict[str, Any]:
@@ -50,10 +58,10 @@ async def _with_fallback(node: NodeModel, call):
     for model in models:
         cost.check_budget()
         try:
-            resp = await call(_params(node, model))
+            resp = await call(_client_for(node), _params(node, model))
         except _NO_FALLBACK:
             raise
-        except openai.APIError as e:
+        except _FALLBACK_ON as e:
             last_error = e
             langfuse.update_current_span(
                 level="WARNING",
@@ -68,7 +76,7 @@ async def _with_fallback(node: NodeModel, call):
 
 async def chat(node: NodeModel, messages: list[dict], *, name: str, **kwargs):
     return await _with_fallback(
-        node, lambda p: _client().chat.completions.create(messages=messages, name=name, **p, **kwargs)
+        node, lambda client, p: client.chat.completions.create(messages=messages, name=name, **p, **kwargs)
     )
 
 
@@ -88,7 +96,7 @@ async def chat_without_input_capture(node: NodeModel, messages: list[dict], *, n
     with langfuse.start_as_current_observation(as_type="generation", name=name, input=input_summary) as gen:
         resp = await _with_fallback(
             node,
-            lambda p: _client().post("/chat/completions", body={"messages": messages, **p}, cast_to=ChatCompletion),
+            lambda client, p: client.post("/chat/completions", body={"messages": messages, **p}, cast_to=ChatCompletion),
         )
         gen.update(
             model=resp.model,
@@ -101,7 +109,7 @@ async def chat_without_input_capture(node: NodeModel, messages: list[dict], *, n
 async def parse(node: NodeModel, messages: list[dict], response_format: type[T], *, name: str) -> T:
     resp = await _with_fallback(
         node,
-        lambda p: _client().chat.completions.parse(messages=messages, response_format=response_format, name=name, **p),
+        lambda client, p: client.chat.completions.parse(messages=messages, response_format=response_format, name=name, **p),
     )
     parsed = resp.choices[0].message.parsed
     if parsed is None:

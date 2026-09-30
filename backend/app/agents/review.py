@@ -19,6 +19,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Literal
 
+import openai
 from langfuse import observe, propagate_attributes
 from pydantic import BaseModel, Field
 
@@ -199,10 +200,19 @@ async def verify_verdicts(clauses: list, flagged: list[ClauseVerdict], evidence:
         for v in flagged
     )
     result = await parse(
-        config.VERIFIER,
+        config.REVIEW_VERIFIER,
         [
             {"role": "system", "content": VERIFY_PROMPT},
-            {"role": "user", "content": f"<evidence>\n{_evidence_block(evidence)}\n</evidence>\n\nВердикты:\n{wrap_untrusted('verdicts', listing)}"},
+            {
+                "role": "user",
+                # The whole contract, not only the flagged clauses: facts such as
+                # the employee's position live in other clauses.
+                "content": (
+                    f"<evidence>\n{_evidence_block(evidence)}\n</evidence>\n\n"
+                    f"<contract>\n{_clauses_block(clauses)}\n</contract>\n\n"
+                    f"Вердикты:\n{wrap_untrusted('verdicts', listing)}"
+                ),
+            },
         ],
         ReviewVerification,
         name="check-verdicts",
@@ -278,7 +288,7 @@ async def review_document(
         session_id=session_id,
         user_id=user_id,
         tags=["review", "document"],
-        metadata={"reviewer_model": config.REVIEWER.model, "verifier_model": config.VERIFIER.model},
+        metadata={"reviewer_model": config.REVIEWER.model, "verifier_model": config.REVIEW_VERIFIER.model},
     ):
         await _emit(on_event, {"type": "stage", "stage": "search", "clauses": len(clauses)})
         evidence = await find_norms(clauses)
@@ -286,7 +296,13 @@ async def review_document(
         draft = await draft_verdicts(clauses, evidence)
         flagged = [v for v in draft.verdicts if v.verdict != "ok"]
         await _emit(on_event, {"type": "stage", "stage": "verify", "flagged": len(flagged)})
-        checks = await verify_verdicts(clauses, flagged, evidence)
+        try:
+            checks = await verify_verdicts(clauses, flagged, evidence)
+        except (openai.OpenAIError, ValueError) as e:
+            # Better an honest review than none: with no checks, settle() turns
+            # every red into "disputed, not confirmed" instead of failing.
+            langfuse.update_current_span(level="WARNING", status_message=f"verifier failed ({type(e).__name__}); reds downgraded")
+            checks = {}
         rows = settle(clauses, draft, checks, evidence)
         for row in rows:
             await _emit(on_event, {"type": "clause", **row})
