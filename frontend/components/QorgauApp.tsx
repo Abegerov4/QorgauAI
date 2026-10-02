@@ -147,6 +147,12 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
       .catch(() => setOnline(false));
   }, [showChat]);
 
+  // The A/B search tab is an admin tool: the API refuses it to everyone else.
+  const canSearch = me?.role === "admin";
+  useEffect(() => {
+    if (me && !canSearch) setTab("assistant");
+  }, [me, canSearch]);
+
   // To the very end of the page: main's bottom padding is what lifts the last
   // message above the fixed composer bar, so scrolling to the thread's last
   // element would leave it under the bar.
@@ -453,6 +459,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
         <Header
           tab={tab}
           onTab={setTab}
+          showSearch={canSearch}
           online={online}
           onNewChat={items.length > 0 ? newChat : undefined}
           onMenu={() => setDrawer(true)}
@@ -849,6 +856,7 @@ function PillIcon({ className, children }: { className: string; children: React.
 type HeaderProps = {
   tab: Tab;
   onTab: (t: Tab) => void;
+  showSearch: boolean;
   online: boolean | null;
   onNewChat?: () => void;
   onMenu: () => void;
@@ -862,7 +870,7 @@ type HeaderProps = {
 // glides between tabs (the "tubelight" pattern). The brand, new chat and the
 // account live in the sidebar; on phones (or with the sidebar hidden) the
 // header brings back the menu button, the emblem and "new chat".
-function Header({ tab, onTab, online, onNewChat, onMenu, sidebarHidden, onShowSidebar }: HeaderProps) {
+function Header({ tab, onTab, showSearch, online, onNewChat, onMenu, sidebarHidden, onShowSidebar }: HeaderProps) {
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
@@ -872,7 +880,7 @@ function Header({ tab, onTab, online, onNewChat, onMenu, sidebarHidden, onShowSi
   }, []);
   // Shown on phones always, on laptops only while the sidebar is hidden.
   const compact = sidebarHidden ? "" : "lg:hidden";
-  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  const allTabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     {
       id: "assistant",
       label: "Помощник",
@@ -880,6 +888,7 @@ function Header({ tab, onTab, online, onNewChat, onMenu, sidebarHidden, onShowSi
     },
     { id: "search", label: "Поиск A/B", icon: <path d="M7 12.5a5.5 5.5 0 100-11 5.5 5.5 0 000 11zM11 11l3.5 3.5" /> },
   ];
+  const tabs = allTabs.filter((t) => showSearch || t.id !== "search");
   const status = online === null ? "Подключение…" : online ? "База подключена" : "Бэкенд недоступен";
   return (
     <header className="pointer-events-none sticky top-0 z-30 px-2 pt-2 sm:px-4">
@@ -910,49 +919,51 @@ function Header({ tab, onTab, online, onNewChat, onMenu, sidebarHidden, onShowSi
             <Wordmark className="hidden min-[480px]:inline" />
           </span>
         </div>
-        <nav className="flex gap-0.5 rounded-full border border-hairline bg-surface-2/70 p-1" aria-label="Разделы">
-          {tabs.map((t) => {
-            const active = tab === t.id;
-            return (
-              <button
-                key={t.id}
-                onClick={() => onTab(t.id)}
-                aria-current={active ? "page" : undefined}
-                aria-label={t.label}
-                className={`pressable t-caption relative rounded-full px-3 py-1.5 font-semibold whitespace-nowrap transition-colors sm:px-4 ${
-                  active ? "text-text" : "text-text-2 hover:text-text"
-                }`}
-              >
-                {active && (
-                  <motion.span layoutId="tubelight" className="absolute inset-0 rounded-full bg-surface shadow-[var(--shadow-sm)]" transition={spring}>
-                    <span className="absolute -top-1 left-1/2 h-1 w-8 -translate-x-1/2 rounded-t-full bg-gold" aria-hidden>
-                      <span className="absolute -top-2 -left-2 h-6 w-12 rounded-full bg-gold/25 blur-md" />
-                      <span className="absolute -top-1 h-6 w-8 rounded-full bg-gold/25 blur-md" />
-                      <span className="absolute top-0 left-2 size-4 rounded-full bg-gold/25 blur-sm" />
-                    </span>
-                  </motion.span>
-                )}
-                <span className="relative flex items-center gap-1.5">
-                  <svg
-                    width="15"
-                    height="15"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="sm:hidden"
-                    aria-hidden
-                  >
-                    {t.icon}
-                  </svg>
-                  <span className="hidden sm:inline">{t.label}</span>
-                </span>
-              </button>
-            );
-          })}
-        </nav>
+        {tabs.length > 1 && (
+          <nav className="flex gap-0.5 rounded-full border border-hairline bg-surface-2/70 p-1" aria-label="Разделы">
+            {tabs.map((t) => {
+              const active = tab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => onTab(t.id)}
+                  aria-current={active ? "page" : undefined}
+                  aria-label={t.label}
+                  className={`pressable t-caption relative rounded-full px-3 py-1.5 font-semibold whitespace-nowrap transition-colors sm:px-4 ${
+                    active ? "text-text" : "text-text-2 hover:text-text"
+                  }`}
+                >
+                  {active && (
+                    <motion.span layoutId="tubelight" className="absolute inset-0 rounded-full bg-surface shadow-[var(--shadow-sm)]" transition={spring}>
+                      <span className="absolute -top-1 left-1/2 h-1 w-8 -translate-x-1/2 rounded-t-full bg-gold" aria-hidden>
+                        <span className="absolute -top-2 -left-2 h-6 w-12 rounded-full bg-gold/25 blur-md" />
+                        <span className="absolute -top-1 h-6 w-8 rounded-full bg-gold/25 blur-md" />
+                        <span className="absolute top-0 left-2 size-4 rounded-full bg-gold/25 blur-sm" />
+                      </span>
+                    </motion.span>
+                  )}
+                  <span className="relative flex items-center gap-1.5">
+                    <svg
+                      width="15"
+                      height="15"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="sm:hidden"
+                      aria-hidden
+                    >
+                      {t.icon}
+                    </svg>
+                    <span className="hidden sm:inline">{t.label}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        )}
         <div className="flex flex-1 items-center justify-end gap-2">
           <AnimatePresence initial={false}>
             {onNewChat && (

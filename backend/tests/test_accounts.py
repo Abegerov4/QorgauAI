@@ -268,3 +268,11 @@ def test_parallel_first_visit_does_not_fail(monkeypatch):
     monkeypatch.setattr(config, "AUTH_REQUIRED", True)
     assert client.get("/me", headers=token("new@example.com")).status_code == 200
     assert len(calls) == 2
+
+
+def test_ab_search_is_for_admins_only(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_REQUIRED", True)
+    monkeypatch.setattr("app.retrieval.embeddings.OPENAI_API_KEY", None)
+    assert client.post("/search", json={"query": "отпуск"}, headers=token("user@example.com")).status_code == 403
+    # An admin gets past the role check (and then hits the missing key, 503).
+    assert client.post("/search", json={"query": "отпуск"}, headers=token("admin@example.com")).status_code == 503

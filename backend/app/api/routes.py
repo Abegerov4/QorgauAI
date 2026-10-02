@@ -63,7 +63,8 @@ def health() -> HealthResponse:
 
 
 @router.post("/search", response_model=SearchResponse)
-def search(req: SearchRequest, _: User = Depends(current_user)) -> SearchResponse:
+def search(req: SearchRequest, _: User = Depends(admin_user)) -> SearchResponse:
+    # The A/B search tab is a demo of the retrieval choice, kept for admins.
     """Pipeline A (dense) or B (hybrid) retrieval -- doc section 9's
     A/B/C benchmark. Pipeline C (agentic, with planner/verifier) lives
     under /ask once the agent graph is wired up."""
