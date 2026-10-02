@@ -149,6 +149,9 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
 
   // The A/B search tab is an admin tool: the API refuses it to everyone else.
   const canSearch = me?.role === "admin";
+  const openTitle = items.length
+    ? (chats?.find((c) => c.id === activeId)?.title ?? chatTitle(items))
+    : "Новый чат";
   useEffect(() => {
     if (me && !canSearch) setTab("assistant");
   }, [me, canSearch]);
@@ -460,6 +463,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
           tab={tab}
           onTab={setTab}
           showSearch={canSearch}
+          title={openTitle}
           online={online}
           onNewChat={items.length > 0 ? newChat : undefined}
           onMenu={() => setDrawer(true)}
@@ -857,6 +861,7 @@ type HeaderProps = {
   tab: Tab;
   onTab: (t: Tab) => void;
   showSearch: boolean;
+  title: string;
   online: boolean | null;
   onNewChat?: () => void;
   onMenu: () => void;
@@ -870,7 +875,7 @@ type HeaderProps = {
 // glides between tabs (the "tubelight" pattern). The brand, new chat and the
 // account live in the sidebar; on phones (or with the sidebar hidden) the
 // header brings back the menu button, the emblem and "new chat".
-function Header({ tab, onTab, showSearch, online, onNewChat, onMenu, sidebarHidden, onShowSidebar }: HeaderProps) {
+function Header({ tab, onTab, showSearch, title, online, onNewChat, onMenu, sidebarHidden, onShowSidebar }: HeaderProps) {
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
@@ -919,7 +924,7 @@ function Header({ tab, onTab, showSearch, online, onNewChat, onMenu, sidebarHidd
             <Wordmark className="hidden min-[480px]:inline" />
           </span>
         </div>
-        {tabs.length > 1 && (
+        {tabs.length > 1 ? (
           <nav className="flex gap-0.5 rounded-full border border-hairline bg-surface-2/70 p-1" aria-label="Разделы">
             {tabs.map((t) => {
               const active = tab === t.id;
@@ -963,6 +968,11 @@ function Header({ tab, onTab, showSearch, online, onNewChat, onMenu, sidebarHidd
               );
             })}
           </nav>
+        ) : (
+          // Without tabs the capsule says which chat is open, like a window title.
+          <p className="t-caption max-w-[45vw] truncate font-semibold text-text sm:max-w-sm" title={title}>
+            {title}
+          </p>
         )}
         <div className="flex flex-1 items-center justify-end gap-2">
           <AnimatePresence initial={false}>
