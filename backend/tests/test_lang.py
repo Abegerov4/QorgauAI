@@ -64,3 +64,29 @@ def test_review_texts_follow_the_language():
 
 def test_api_rejects_an_unknown_language():
     assert client.post("/ask", json={"question": "q", "lang": "de"}).status_code == 422
+
+
+def test_article_is_translated_for_other_languages(monkeypatch):
+    from app.agents.translate import ArticleTranslation
+    from app.api import routes
+
+    async def fake(code, number, title, chapter, points, lang):
+        return ArticleTranslation(title=f"Article {number}", chapter="Chapter", points=[f"[{lang}] {p[:10]}" for p in points])
+
+    monkeypatch.setattr(routes, "translate_article", fake)
+    ru = client.get("/articles/labor_code/88").json()
+    en = client.get("/articles/labor_code/88?lang=en").json()
+    assert ru["translated"] is False and en["translated"] is True
+    assert en["article"] == "Article 88" and len(en["points"]) == len(ru["points"])
+    assert en["points"][0]["point"] == ru["points"][0]["point"]  # point labels stay raw for matching citations
+
+
+def test_article_falls_back_to_russian_when_translation_fails(monkeypatch):
+    from app.api import routes
+
+    async def broken(*a, **k):
+        return None
+
+    monkeypatch.setattr(routes, "translate_article", broken)
+    body = client.get("/articles/labor_code/88?lang=kk").json()
+    assert body["translated"] is False and "Статья 88" in body["article"]

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ArticleResponse, Clause } from "@/lib/api";
 import { loadArticle } from "@/lib/articles";
 import type { Citation } from "@/lib/citations";
-import { useT } from "@/lib/i18n";
+import { useLang, useT } from "@/lib/i18n";
 
 type Props = { citation: Citation; clauses: Clause[] };
 
@@ -41,19 +41,23 @@ export function CitationView({ citation, clauses }: Props) {
 
 function ArticleView({ citation }: { citation: Extract<Citation, { kind: "law" }> }) {
   const t = useT();
+  const { lang } = useLang();
+  // Kazakh and English readers see a machine translation; one tap shows the official Russian.
+  const [original, setOriginal] = useState(false);
+  const shown = original ? "ru" : lang;
   const [article, setArticle] = useState<ArticleResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const highlighted = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let alive = true;
-    loadArticle(citation.codeKey, citation.article)
+    loadArticle(citation.codeKey, citation.article, shown)
       .then((a) => alive && setArticle(a))
       .catch((e: Error) => alive && setError(e.message));
     return () => {
       alive = false;
     };
-  }, [citation.codeKey, citation.article]);
+  }, [citation.codeKey, citation.article, shown]);
 
   useEffect(() => {
     highlighted.current?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -70,6 +74,14 @@ function ArticleView({ citation }: { citation: Extract<Citation, { kind: "law" }
         {article ? article.article : t.article(citation.article)}
       </h2>
       {article && <p className="t-caption mt-1 text-text-2">{article.chapter}</p>}
+      {lang !== "ru" && article && (
+        <p className="t-caption mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-surface-2 px-3 py-2 text-text-2">
+          {!original && article.translated && <span>{t.machineTranslation}</span>}
+          <button onClick={() => setOriginal((o) => !o)} className="pressable font-semibold text-accent-ink">
+            {original ? t.showTranslation : t.showOriginal}
+          </button>
+        </p>
+      )}
 
       {error && <p className="t-body mt-4 text-red">{error}</p>}
       {!article && !error && (
@@ -89,7 +101,7 @@ function ArticleView({ citation }: { citation: Extract<Citation, { kind: "law" }
                 ref={isCited ? highlighted : undefined}
                 className={`rounded-xl px-3 py-2 ${isCited ? "bg-gold-soft shadow-[inset_3px_0_0_var(--gold)]" : ""}`}
               >
-                {p.point && <p className="t-caption font-semibold text-text-2">{p.point}</p>}
+                {p.point && <p className="t-caption font-semibold text-text-2">{shown === "ru" ? p.point : t.pointTitle(p.point)}</p>}
                 <p className="t-body">{p.text}</p>
               </div>
             );

@@ -71,6 +71,10 @@ REVIEW_VERIFIER = _node(
     retries=0,
 )
 
+# Machine translation of law articles for the Kazakh and English interface:
+# a faithful rendering of one article, cached per article and language.
+TRANSLATOR = _node("TRANSLATOR", "gpt-5.4-mini", 0.0, None, 6000, "gpt-5.4", timeout=90)
+
 MAX_RESEARCH_STEPS = 4  # tool calls per research pass (doc: planner 2-4 steps)
 # A contract review needs a norm per disputed clause, so it gets more steps.
 MAX_RESEARCH_STEPS_DOCUMENT = 8

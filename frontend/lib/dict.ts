@@ -203,7 +203,6 @@ const ru = {
   truncated: (n: number) => `Проверены первые ${n} пунктов: договор длиннее.`,
   letterFile: "Письмо работодателю.txt",
   letterIntro: "Черновик по нарушениям из проверки, со ссылками на статьи. Замените текст в [квадратных скобках] и перечитайте перед отправкой.",
-  letterLangNote: "",
   letterText: "Текст письма",
   downloadTxt: "Скачать .txt",
   resetText: "Вернуть исходный текст",
@@ -286,6 +285,11 @@ const ru = {
     subpoint: (n: string) => `пп. ${n}`,
     contract: (n: string) => `Договор, п. ${n}`,
   },
+
+  machineTranslation: "",
+  showOriginal: "Показать оригинал",
+  showTranslation: "Показать перевод",
+  pointTitle: (raw: string) => raw,
 
   // Sign-in
   signInLead: "Ответы по Конституции и Трудовому кодексу РК — со ссылкой на каждую статью.",
@@ -478,7 +482,6 @@ const kk: Dict = {
   truncated: (n) => `Алғашқы ${n} тармақ тексерілді: шарт бұдан ұзын.`,
   letterFile: "Жұмыс берушіге хат.txt",
   letterIntro: "Тексерудегі бұзушылықтар бойынша бап сілтемелері бар жоба. [Тік жақшадағы] мәтінді ауыстырып, жібермес бұрын қайта оқыңыз.",
-  letterLangNote: "Хат орыс тілінде құрастырылады — шарт пен заңның ресми мәтіні сол тілде.",
   letterText: "Хат мәтіні",
   downloadTxt: ".txt жүктеу",
   resetText: "Бастапқы мәтінді қайтару",
@@ -559,6 +562,11 @@ const kk: Dict = {
     subpoint: (n) => `${n}-тармақша`,
     contract: (n) => `Шарт, ${n}-тармақ`,
   },
+
+  machineTranslation: "Ресми орыс тіліндегі мәтіннің машиналық аудармасы. Заңдық күші түпнұсқада.",
+  showOriginal: "Түпнұсқаны көрсету",
+  showTranslation: "Аударманы көрсету",
+  pointTitle: (raw) => raw.replace(/подпункт\s+([^,\s)]+)\)?/i, "$1-тармақша").replace(/(^|,\s*)Пункт\s+([^,\s]+)/i, "$1$2-тармақ"),
 
   signInLead: "ҚР Конституциясы мен Еңбек кодексі бойынша жауаптар — әр бапқа сілтемемен.",
   signInGoogle: "Google арқылы кіру",
@@ -747,7 +755,6 @@ const en: Dict = {
   truncated: (n) => `Only the first ${n} clauses were checked: the contract is longer.`,
   letterFile: "Letter to employer.txt",
   letterIntro: "A draft based on the violations found, with article references. Replace the text in [square brackets] and reread it before sending.",
-  letterLangNote: "The letter is drafted in Russian, the language of the contract and the official text of the law.",
   letterText: "Letter text",
   downloadTxt: "Download .txt",
   resetText: "Restore the original text",
@@ -828,6 +835,11 @@ const en: Dict = {
     subpoint: (n) => `subp. ${n}`,
     contract: (n) => `Contract, cl. ${n}`,
   },
+
+  machineTranslation: "Machine translation of the official Russian text. The original is the legally binding version.",
+  showOriginal: "Show original",
+  showTranslation: "Show translation",
+  pointTitle: (raw) => raw.replace(/подпункт\s+([^,\s)]+)\)?/i, "subparagraph $1").replace(/(^|,\s*)Пункт\s+/i, "$1Paragraph "),
 
   signInLead: "Answers from the Constitution and the Labor Code of Kazakhstan, citing every article.",
   signInGoogle: "Sign in with Google",

@@ -1,15 +1,16 @@
 import { api, type ArticleResponse } from "./api";
 import type { Citation } from "./citations";
+import type { Lang } from "./dict";
 
 // Articles never change while the app runs, so each is fetched once: a hover
 // preview warms the cache and the sheet opened by the click shows instantly.
 const cache = new Map<string, Promise<ArticleResponse>>();
 
-export function loadArticle(codeKey: string, number: string): Promise<ArticleResponse> {
-  const key = `${codeKey}/${number}`;
+export function loadArticle(codeKey: string, number: string, lang: Lang = "ru"): Promise<ArticleResponse> {
+  const key = `${codeKey}/${number}/${lang}`;
   let p = cache.get(key);
   if (!p) {
-    p = api.article(codeKey, number);
+    p = api.article(codeKey, number, lang);
     p.catch(() => cache.delete(key)); // let a later attempt retry
     cache.set(key, p);
   }

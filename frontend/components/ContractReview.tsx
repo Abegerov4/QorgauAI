@@ -19,8 +19,9 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { api, type Clause, type ContractReview as Review, type ReviewRow, type ReviewVerdict } from "@/lib/api";
-import { citationLabel, parseCitation } from "@/lib/citations";
-import { useT } from "@/lib/i18n";
+import { loadArticle } from "@/lib/articles";
+import { citationLabel, parseCitation, type Citation } from "@/lib/citations";
+import { useLang, useT } from "@/lib/i18n";
 import { spring, springSnappy } from "@/lib/motion";
 import { employerLetter } from "@/lib/reviewText";
 import { CitationView } from "./CitationView";
@@ -199,7 +200,8 @@ function ActionButton({
 // A draft the user edits (placeholders in [brackets]) and then copies or saves.
 function LetterView({ review }: { review: Review }) {
   const t = useT();
-  const [text, setText] = useState(() => employerLetter(review));
+  const { lang } = useLang();
+  const [text, setText] = useState(() => employerLetter(review, lang));
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -213,7 +215,6 @@ function LetterView({ review }: { review: Review }) {
     <div className="pb-2">
       <h2 className="t-title pr-10">{t.letter}</h2>
       <p className="t-caption mt-1 text-text-2">{t.letterIntro}</p>
-      {t.letterLangNote && <p className="t-caption mt-1 text-text-3">{t.letterLangNote}</p>}
       <label htmlFor="letter" className="sr-only">
         {t.letterText}
       </label>
@@ -240,7 +241,7 @@ function LetterView({ review }: { review: Review }) {
           {t.downloadTxt}
         </button>
         <button
-          onClick={() => setText(employerLetter(review))}
+          onClick={() => setText(employerLetter(review, lang))}
           className="pressable t-caption px-2 py-1.5 font-medium text-text-2 hover:text-text"
         >
           {t.resetText}
@@ -422,7 +423,9 @@ export function ReviewDetail({ row, onAsk }: { row: ReviewRow; onAsk?: (row: Rev
               return (
                 <li key={n.citation} className="border-l-2 border-gold pl-3">
                   <p className="t-caption font-semibold text-gold-ink">{citationLabel(c, t)}</p>
-                  <p className="text-[0.9375rem] leading-snug mt-0.5 text-text">{n.text}</p>
+                  <p className="text-[0.9375rem] leading-snug mt-0.5 text-text">
+                    {c.kind === "law" ? <NormText citation={c} text={n.text} /> : n.text}
+                  </p>
                   {c.kind === "law" && (
                     <button onClick={() => setArticle(n.citation)} className="pressable t-caption mt-1 font-semibold text-accent-ink">
                       {t.wholeArticle}
@@ -456,6 +459,29 @@ export function ReviewDetail({ row, onAsk }: { row: ReviewRow; onAsk?: (row: Rev
       )}
     </div>
   );
+}
+
+// The quoted norm in the reader's language: the same point of the machine-
+// translated article (cached with the article view), or the Russian quote
+// when the citation names no single point.
+function NormText({ citation, text }: { citation: Extract<Citation, { kind: "law" }>; text: string }) {
+  const { lang } = useLang();
+  const { codeKey, article, point } = citation;
+  const [translated, setTranslated] = useState<string | null>(null);
+  useEffect(() => {
+    if (lang === "ru" || !point) return;
+    let alive = true;
+    loadArticle(codeKey, article, lang)
+      .then((a) => {
+        const found = a.translated ? a.points.find((p) => p.point === point) : undefined;
+        if (alive && found) setTranslated(found.text);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [codeKey, article, point, lang]);
+  return <>{lang !== "ru" && translated ? translated : text}</>;
 }
 
 function CopyFix({ text }: { text: string }) {

@@ -53,6 +53,7 @@ class ArticleResponse(BaseModel):
     article: str
     article_number: str
     points: list[ArticlePoint]
+    translated: bool = False  # machine translation of the Russian official text
 
 
 class AskRequest(BaseModel):
@@ -160,6 +161,7 @@ class ReviewReportRequest(BaseModel):
     clauses: list[ReviewRowIn] = Field(max_length=60)
     truncated: bool = False
     disclaimer: str = Field("", max_length=1000)
+    lang: Lang = "ru"
 
 
 class ChatRename(BaseModel):

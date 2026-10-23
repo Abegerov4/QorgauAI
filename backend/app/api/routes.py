@@ -18,6 +18,7 @@ from app.agents.cost import CURRENT, Meter
 from app.agents.graph import answer_question
 from app.agents.lang import Lang
 from app.agents.review import review_document
+from app.agents.translate import translate_article
 from app.api.schemas import (
     AdminUserUpdate,
     ArticlePoint,
@@ -91,20 +92,40 @@ def search(req: SearchRequest, _: User = Depends(admin_user)) -> SearchResponse:
 
 
 @router.get("/articles/{code}/{article_number}", response_model=ArticleResponse)
-def article(code: str, article_number: str) -> ArticleResponse:
-    """Full text of one article -- the frontend opens it from a citation card."""
+async def article(code: str, article_number: str, lang: Lang = "ru") -> ArticleResponse:
+    """Full text of one article -- the frontend opens it from a citation card.
+    For `kk`/`en` the text is machine-translated from the Russian official text."""
     if code not in CODE_NAMES:
         raise HTTPException(status_code=404, detail=f"Неизвестный документ: {code}")
     chunks = get_article(code, article_number)
     if not chunks:
         raise HTTPException(status_code=404, detail=f"Статья {article_number} не найдена.")
     first = chunks[0]
-    return ArticleResponse(
+    response = ArticleResponse(
         code=first.code,
         chapter=first.chapter,
         article=first.article,
         article_number=first.article_number,
         points=[ArticlePoint(point=c.point, text=c.text) for c in chunks],
+    )
+    if lang == "ru":
+        return response
+    try:
+        tr = await translate_article(
+            code, article_number, first.article, first.chapter, [c.text for c in chunks], lang
+        )
+    except Exception:
+        log.exception("article translation failed")
+        tr = None
+    if tr is None:
+        return response  # the Russian text, unmarked: better than nothing
+    return response.model_copy(
+        update={
+            "article": tr.title,
+            "chapter": tr.chapter,
+            "points": [ArticlePoint(point=p.point, text=t) for p, t in zip(response.points, tr.points)],
+            "translated": True,
+        }
     )
 
 
@@ -333,10 +354,14 @@ def put_chat(chat_id: ChatId, payload: ChatPayload, user: User = Depends(current
 
 
 @router.post("/reports/contract-review")
-def contract_review_pdf(review: ReviewReportRequest, _: User = Depends(current_user)) -> Response:
+async def contract_review_pdf(review: ReviewReportRequest, _: User = Depends(current_user)) -> Response:
     """The finished review as a PDF to download. Rendered from what the client
-    sends back (the review is not stored), so it costs no model calls."""
-    pdf = render_review_pdf(review.model_dump())
+    sends back (the review is not stored). In Russian it costs no model calls;
+    in Kazakh or English the quoted norms come from the cached article translations."""
+    data = review.model_dump()
+    if review.lang != "ru":
+        await _translate_norms(data["clauses"], review.lang)
+    pdf = render_review_pdf(data, lang=review.lang)
     stem = re.sub(r"\.[^.]+$", "", review.filename) or "договор"
     name = quote(f"Проверка договора — {stem}.pdf")
     return Response(
@@ -344,6 +369,27 @@ def contract_review_pdf(review: ReviewReportRequest, _: User = Depends(current_u
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=\"contract-review.pdf\"; filename*=UTF-8''{name}"},
     )
+
+
+async def _translate_norms(rows: list[dict], lang: Lang) -> None:
+    """Swap each quoted point of a norm for the same point of the translated article, in place."""
+    articles: dict[tuple[str, str], dict[str, str]] = {}
+    for row in rows:
+        for norm in row.get("norms") or []:
+            m = re.search(r"Статья\s+([\w.\-]+)(?:,\s*(.+))?$", norm["citation"])
+            if not m or not m.group(2):
+                continue  # a whole article or not a law citation: keep the quote
+            code = "constitution" if norm["citation"].startswith("Конституция") else "labor_code"
+            key = (code, m.group(1))
+            if key not in articles:
+                chunks = get_article(*key)
+                try:
+                    tr = await translate_article(code, key[1], chunks[0].article, chunks[0].chapter, [c.text for c in chunks], lang) if chunks else None
+                except Exception:
+                    log.exception("norm translation failed")
+                    tr = None
+                articles[key] = {c.point: t for c, t in zip(chunks, tr.points)} if tr else {}
+            norm["text"] = articles[key].get(m.group(2), norm["text"])
 
 
 @router.patch("/chats/{chat_id}", status_code=204)

@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import type { ArticleResponse } from "@/lib/api";
 import { citedPoint, loadArticle } from "@/lib/articles";
 import { citationLabel, parseCitation, type Citation } from "@/lib/citations";
-import { useT } from "@/lib/i18n";
+import { useLang, useT } from "@/lib/i18n";
 import { springSnappy } from "@/lib/motion";
 
 // A citation chip. Click opens the full article in the sheet (as before);
@@ -116,18 +116,19 @@ export function CitationChip({ raw, onCite, className }: Props) {
 
 function Preview({ citation }: { citation: Extract<Citation, { kind: "law" }> }) {
   const t = useT();
+  const { lang } = useLang();
   const [article, setArticle] = useState<ArticleResponse | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    loadArticle(citation.codeKey, citation.article)
+    loadArticle(citation.codeKey, citation.article, lang)
       .then((a) => alive && setArticle(a))
       .catch(() => alive && setFailed(true));
     return () => {
       alive = false;
     };
-  }, [citation.codeKey, citation.article]);
+  }, [citation.codeKey, citation.article, lang]);
 
   const point = article && citedPoint(article, citation);
   return (

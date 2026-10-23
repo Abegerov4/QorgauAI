@@ -134,6 +134,7 @@ export type ArticleResponse = {
   article: string;
   article_number: string;
   points: { point: string; text: string }[];
+  translated?: boolean;
 };
 
 export type SearchChunk = {
@@ -286,7 +287,7 @@ export const api = {
   reviewPdf: async (review: ContractReview): Promise<Blob> => {
     let resp: Response;
     try {
-      resp = await fetch(API_URL + "/reports/contract-review", withAuth(json(review), await authHeaders()));
+      resp = await fetch(API_URL + "/reports/contract-review", withAuth(json({ ...review, lang: currentLang() }), await authHeaders()));
     } catch {
       throw new ApiError(0, getT().errUnavailable);
     }
@@ -298,8 +299,8 @@ export const api = {
     form.append("file", file);
     return request<DocumentResponse>("/documents", { method: "POST", body: form });
   },
-  article: (codeKey: string, number: string) =>
-    request<ArticleResponse>(`/articles/${codeKey}/${encodeURIComponent(number)}`),
+  article: (codeKey: string, number: string, lang = "ru") =>
+    request<ArticleResponse>(`/articles/${codeKey}/${encodeURIComponent(number)}?lang=${lang}`),
   search: (query: string, pipeline: "dense" | "hybrid", topK = 5) =>
     request<SearchResponse>("/search", json({ query, pipeline, top_k: topK })),
   me: () => request<Me>("/me"),

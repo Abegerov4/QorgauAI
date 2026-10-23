@@ -1,5 +1,6 @@
 """The contract review PDF: rendered on the server from the client's review, no LLM calls."""
 
+import unicodedata
 from urllib.parse import unquote
 
 import pymupdf
@@ -45,3 +46,22 @@ def test_pdf_needs_sign_in_and_a_valid_review(monkeypatch):
     assert client.post("/reports/contract-review", json=bad).status_code == 422
     monkeypatch.setattr(config, "AUTH_REQUIRED", True)
     assert client.post("/reports/contract-review", json=REVIEW).status_code == 401
+
+
+def test_pdf_speaks_the_chosen_language(monkeypatch):
+    from app.agents.translate import ArticleTranslation
+    from app.api import routes
+
+    async def fake(code, number, title, chapter, points, lang):
+        return ArticleTranslation(title=title, chapter=chapter, points=[f"<{lang}> {p}" for p in points])
+
+    monkeypatch.setattr(routes, "translate_article", fake)
+    for lang, expected in (("en", ("Violations", "Clause 3.3", "LC art. 36, p. 2", "How to fix it:")),
+                           ("kk", ("Бұзушылықтар", "3.3-тармақ", "ЕК 36-бап, 2-тармақ", "Қалай түзету керек:", "Неліктен."))):
+        resp = client.post("/reports/contract-review", json={**REVIEW, "lang": lang})
+        # NFKC: the Ubuntu font sets Latin "fi" as one ligature glyph in the text layer.
+        text = unicodedata.normalize("NFKC", "".join(page.get_text() for page in pymupdf.open(stream=resp.content, filetype="pdf")))
+        for phrase in expected:
+            assert phrase in text, (lang, phrase)
+        assert "Испытательный срок три месяца" in text  # the contract wording stays as written
+        assert f"<{lang}>" in text  # the quoted norm comes from the translated article
