@@ -24,6 +24,8 @@ from langfuse import observe, propagate_attributes
 from pydantic import BaseModel, Field
 
 from app.agents import config
+from app.agents.lang import Lang, review_note, verify_note
+from app.agents.lang import text as lang_text
 from app.agents.llm import parse
 from app.guardrails.untrusted import wrap_untrusted
 from app.ingestion.documents import IngestedDocument
@@ -40,10 +42,7 @@ PER_CLAUSE_TOP_K = 3
 PER_TOPIC_TOP_K = 4
 SEARCH_CONCURRENCY = 6
 
-DISCLAIMER = (
-    "Проверка сравнивает пункты только с Конституцией и Трудовым кодексом РК. «Нарушений не найдено» не значит, "
-    "что пункт безупречен: другие законы и обстоятельства дела не учитываются. Для спора обратитесь к юристу."
-)
+DISCLAIMER = lang_text("review_disclaimer", "ru")
 
 # A reviewer's checklist: the Labor Code article a clause of this topic is
 # decided by, always included whole. Similarity search alone misses them --
@@ -172,14 +171,15 @@ def _clauses_block(clauses: list) -> str:
 
 
 @observe(name="review-clauses", as_type="agent", capture_input=False, capture_output=False)
-async def draft_verdicts(clauses: list, evidence: list[dict]) -> ReviewDraft:
+async def draft_verdicts(clauses: list, evidence: list[dict], lang: Lang = "ru") -> ReviewDraft:
     draft = await parse(
         config.REVIEWER,
         [
             {"role": "system", "content": REVIEW_PROMPT},
             {
                 "role": "user",
-                "content": f"<evidence>\n{_evidence_block(evidence)}\n</evidence>\n\n<contract>\n{_clauses_block(clauses)}\n</contract>",
+                "content": f"<evidence>\n{_evidence_block(evidence)}\n</evidence>\n\n<contract>\n{_clauses_block(clauses)}\n</contract>"
+                f"{review_note(lang)}",
             },
         ],
         ReviewDraft,
@@ -190,7 +190,9 @@ async def draft_verdicts(clauses: list, evidence: list[dict]) -> ReviewDraft:
 
 
 @observe(name="verify-verdicts", as_type="agent", capture_input=False, capture_output=False)
-async def verify_verdicts(clauses: list, flagged: list[ClauseVerdict], evidence: list[dict]) -> dict[str, VerdictCheck]:
+async def verify_verdicts(
+    clauses: list, flagged: list[ClauseVerdict], evidence: list[dict], lang: Lang = "ru"
+) -> dict[str, VerdictCheck]:
     if not flagged:
         return {}
     text = {c.clause_number: c.text for c in clauses}
@@ -211,6 +213,7 @@ async def verify_verdicts(clauses: list, flagged: list[ClauseVerdict], evidence:
                     f"<evidence>\n{_evidence_block(evidence)}\n</evidence>\n\n"
                     f"<contract>\n{_clauses_block(clauses)}\n</contract>\n\n"
                     f"Вердикты:\n{wrap_untrusted('verdicts', listing)}"
+                    f"{verify_note(lang)}"
                 ),
             },
         ],
@@ -225,7 +228,9 @@ async def verify_verdicts(clauses: list, flagged: list[ClauseVerdict], evidence:
 # ------------------------------------------------------------------ assembly
 
 
-def settle(clauses: list, draft: ReviewDraft, checks: dict[str, VerdictCheck], evidence: list[dict]) -> list[dict]:
+def settle(
+    clauses: list, draft: ReviewDraft, checks: dict[str, VerdictCheck], evidence: list[dict], lang: Lang = "ru"
+) -> list[dict]:
     """The code critic: what the UI shows for every clause, whatever the LLMs said.
 
     - a clause the reviewer skipped is "unchecked" (grey), never green;
@@ -238,7 +243,7 @@ def settle(clauses: list, draft: ReviewDraft, checks: dict[str, VerdictCheck], e
     for c in clauses:
         v = by_clause.get(c.clause_number)
         if v is None:
-            out.append(_row(c, "unchecked", "Модель не вынесла вердикт по этому пункту — проверьте его сами.", None, [], None))
+            out.append(_row(c, "unchecked", lang_text("no_verdict", lang), None, [], None))
             continue
         ids = [i for i in dict.fromkeys(v.evidence_ids) if i in by_id]
         norms = [{"citation": by_id[i]["citation"], "text": by_id[i]["text"]} for i in ids]
@@ -251,8 +256,8 @@ def settle(clauses: list, draft: ReviewDraft, checks: dict[str, VerdictCheck], e
         explanation = v.explanation
         if v.verdict == "violation" and not confirmed:
             verdict = "disputed"
-            reason = check.explanation if check and ids else "вывод не подкреплён найденной нормой."
-            explanation = f"{v.explanation} Проверяющий не подтвердил нарушение: {reason}"
+            reason = check.explanation if check and ids else lang_text("no_norm_reason", lang)
+            explanation = f"{v.explanation} {lang_text('not_confirmed', lang)} {reason}"
         out.append(_row(c, verdict, explanation, v.fix, norms, confirmed))
     return out
 
@@ -276,6 +281,7 @@ async def review_document(
     on_event: OnEvent = None,
     user_id: str | None = None,
     session_id: str | None = None,
+    lang: Lang = "ru",
 ) -> dict:
     """Review every clause of an uploaded contract. Streams {"type": "stage"}
     while it works and {"type": "clause"} per clause once the verdicts are
@@ -287,23 +293,23 @@ async def review_document(
         trace_name="review-contract",
         session_id=session_id,
         user_id=user_id,
-        tags=["review", "document"],
+        tags=["review", "document", f"lang:{lang}"],
         metadata={"reviewer_model": config.REVIEWER.model, "verifier_model": config.REVIEW_VERIFIER.model},
     ):
         await _emit(on_event, {"type": "stage", "stage": "search", "clauses": len(clauses)})
         evidence = await find_norms(clauses)
         await _emit(on_event, {"type": "stage", "stage": "review", "norms": len(evidence)})
-        draft = await draft_verdicts(clauses, evidence)
+        draft = await draft_verdicts(clauses, evidence, lang)
         flagged = [v for v in draft.verdicts if v.verdict != "ok"]
         await _emit(on_event, {"type": "stage", "stage": "verify", "flagged": len(flagged)})
         try:
-            checks = await verify_verdicts(clauses, flagged, evidence)
+            checks = await verify_verdicts(clauses, flagged, evidence, lang)
         except (openai.OpenAIError, ValueError) as e:
             # Better an honest review than none: with no checks, settle() turns
             # every red into "disputed, not confirmed" instead of failing.
             langfuse.update_current_span(level="WARNING", status_message=f"verifier failed ({type(e).__name__}); reds downgraded")
             checks = {}
-        rows = settle(clauses, draft, checks, evidence)
+        rows = settle(clauses, draft, checks, evidence, lang)
         for row in rows:
             await _emit(on_event, {"type": "clause", **row})
         counts = {k: sum(r["verdict"] == k for r in rows) for k in ("violation", "disputed", "ok", "unchecked")}
@@ -313,7 +319,7 @@ async def review_document(
             "counts": counts,
             "clauses": rows,
             "truncated": len(clauses) == MAX_CLAUSES and len(document.findings.clauses) > MAX_CLAUSES,
-            "disclaimer": DISCLAIMER,
+            "disclaimer": lang_text("review_disclaimer", lang),
             "trace_id": langfuse.get_current_trace_id(),
         }
         root.update(output={"counts": counts})

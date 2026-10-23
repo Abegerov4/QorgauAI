@@ -25,6 +25,8 @@ from langfuse import observe, propagate_attributes
 from langgraph.graph import END, START, StateGraph
 
 from app.agents import config
+from app.agents.lang import Lang, answer_note, research_note, verify_note
+from app.agents.lang import text as lang_text
 from app.agents.llm import chat, parse
 from app.agents.schemas import AnswerClaim, Draft, FinalAnswer, ResearchSummary, Verification
 from app.agents.toolbox import LegalToolbox
@@ -41,10 +43,7 @@ FINISH_TOOL = openai.pydantic_function_tool(
     description="Заверши исследование: найденных норм достаточно, тема вне корпуса или поиск больше ничего не даёт.",
 )
 
-DISCLAIMER = (
-    "QorgauAI — информационный помощник, а не юрист. Ответ основан только на процитированных нормах "
-    "Конституции и Трудового кодекса РК; для спорной ситуации обратитесь к практикующему юристу."
-)
+DISCLAIMER = lang_text("disclaimer", "ru")
 
 
 class AgentState(TypedDict, total=False):
@@ -63,6 +62,7 @@ class AgentState(TypedDict, total=False):
     document_block: str | None  # uploaded document clauses, PII-masked, already wrapped as untrusted
     max_research_steps: int
     tool_log: list[dict]  # {"name", "args", "found", "result", "attempt"}: what the planner did, for the UI
+    lang: Lang  # language of the answer; search and evidence stay Russian
 
 
 # Live progress for /ask/stream. answer_question sets the callback; LangGraph
@@ -155,7 +155,7 @@ def make_research(toolbox: LegalToolbox):
         await _emit({"type": "step", "node": "research"})
         messages = list(state.get("research_messages") or [])
         if not messages:
-            user_msg = "Вопрос пользователя:\n" + wrap_untrusted("user", state["question"])
+            user_msg = "Вопрос пользователя:\n" + wrap_untrusted("user", state["question"]) + research_note(state.get("lang", "ru"))
             if state.get("document_block"):
                 user_msg += "\n\nЗагруженный пользователем документ:\n<document>\n" + state["document_block"] + "\n</document>"
             messages = [
@@ -241,6 +241,7 @@ async def generate(state: AgentState) -> AgentState:
                     f"<evidence>\n{_evidence_block(evidence)}\n</evidence>\n\n"
                     f"Вопрос пользователя:\n{wrap_untrusted('user', state['question'])}\n\n"
                     f"Исследователь отметил, что может не хватать: {missing or 'ничего'}"
+                    f"{answer_note(state.get('lang', 'ru'))}"
                 ),
             },
         ],
@@ -264,7 +265,11 @@ async def verify(state: AgentState) -> AgentState:
         config.VERIFIER,
         [
             {"role": "system", "content": PROMPTS["verify"]},
-            {"role": "user", "content": f"<evidence>\n{_evidence_block(state['evidence'])}\n</evidence>\n\nУтверждения:\n{claims_block}"},
+            {
+                "role": "user",
+                "content": f"<evidence>\n{_evidence_block(state['evidence'])}\n</evidence>\n\nУтверждения:\n{claims_block}"
+                f"{verify_note(state.get('lang', 'ru'))}",
+            },
         ],
         Verification,
         name="check-citations",
@@ -313,15 +318,13 @@ async def finalize(state: AgentState) -> AgentState:
     evidence = {e["id"]: e for e in state.get("evidence") or []}
     draft = state.get("draft")
     missing = list((draft or {}).get("missing_info") or summary.get("missing_info") or [])
+    lang = state.get("lang", "ru")
+    disclaimer = lang_text("disclaimer", lang)
 
     if not draft:
-        reason = (
-            "Этот вопрос вне тем, которые покрывает QorgauAI: сейчас в базе только Конституция и Трудовой кодекс Республики Казахстан."
-            if summary and not summary.get("in_scope", True)
-            else "В доступных текстах Конституции и Трудового кодекса РК не нашлось нормы, которая отвечает на этот вопрос."
-        )
+        reason = lang_text("out_of_scope" if summary and not summary.get("in_scope", True) else "no_norm", lang)
         final = FinalAnswer(status="refused", answer=reason, claims=[], sources=[], missing_info=missing,
-                            removed_claims=[], recommend_lawyer=False, disclaimer=DISCLAIMER)
+                            removed_claims=[], recommend_lawyer=False, disclaimer=disclaimer)
     else:
         checks = {c["claim_index"]: c for c in state["verification"]["checks"]}
         kept, removed = [], []
@@ -336,10 +339,10 @@ async def finalize(state: AgentState) -> AgentState:
             answer = " ".join(c.text for c in kept)
         else:
             status = "refused"
-            answer = "Не удалось подтвердить ответ нормами Конституции и Трудового кодекса РК, поэтому я не буду его давать."
+            answer = lang_text("unconfirmed", lang)
         follow_ups = [q.strip()[:150] for q in draft.get("follow_up_questions") or [] if q.strip()][:3] if kept else []
         final = FinalAnswer(status=status, answer=answer, claims=kept, sources=sources, missing_info=missing,
-                            removed_claims=removed, recommend_lawyer=bool(draft["recommend_lawyer"]), disclaimer=DISCLAIMER,
+                            removed_claims=removed, recommend_lawyer=bool(draft["recommend_lawyer"]), disclaimer=disclaimer,
                             follow_ups=follow_ups)
 
     langfuse.update_current_span(output=final.model_dump())
@@ -393,6 +396,7 @@ async def answer_question(
     tags: list[str] | None = None,
     on_event: Callable[[dict], Awaitable[None]] | None = None,
     user_id: str | None = None,
+    lang: Lang = "ru",
 ) -> dict:
     """Run pipeline C as one Langfuse trace. Returns the final state.
 
@@ -409,6 +413,7 @@ async def answer_question(
         "question": question,
         "pii_masked": bool(mapping),
         "pii_types": sorted({k.strip("[]").rsplit("_", 1)[0] for k in mapping}),
+        "lang": lang,
     }
     del mapping  # raw values must never enter the graph or telemetry
     with langfuse.start_as_current_observation(
@@ -417,7 +422,7 @@ async def answer_question(
         trace_name="answer-question",
         session_id=session_id,
         user_id=user_id,
-        tags=["pipeline:C", *(["document"] if document else []), *(tags or [])],
+        tags=["pipeline:C", f"lang:{lang}", *(["document"] if document else []), *(tags or [])],
         metadata={
             "research_model": config.RESEARCH.model,
             "generator_model": config.GENERATOR.model,

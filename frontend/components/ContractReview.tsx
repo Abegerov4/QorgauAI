@@ -20,7 +20,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { api, type Clause, type ContractReview as Review, type ReviewRow, type ReviewVerdict } from "@/lib/api";
 import { citationLabel, parseCitation } from "@/lib/citations";
-import { plural } from "@/lib/labels";
+import { useT } from "@/lib/i18n";
 import { spring, springSnappy } from "@/lib/motion";
 import { employerLetter } from "@/lib/reviewText";
 import { CitationView } from "./CitationView";
@@ -42,25 +42,21 @@ export type ReviewState = {
 
 export const VERDICT: Record<
   ReviewVerdict,
-  { label: string; short: string; icon: typeof XCircleIcon; ink: string; bar: string; tint: string; chip: string }
+  { icon: typeof XCircleIcon; ink: string; bar: string; tint: string; chip: string }
 > = {
-  violation: { label: "Нарушение", short: "нарушение", icon: XCircleIcon, ink: "text-red", bar: "bg-red", tint: "bg-red-soft", chip: "bg-red-soft text-red" },
-  disputed: { label: "Спорно", short: "спорно", icon: ExclamationTriangleIcon, ink: "text-gold-ink", bar: "bg-gold", tint: "bg-gold-soft", chip: "bg-gold-soft text-gold-ink" },
-  ok: { label: "Нарушений не найдено", short: "без нарушений", icon: CheckCircleIcon, ink: "text-green", bar: "bg-green", tint: "", chip: "bg-green-soft text-green" },
-  unchecked: { label: "Не проверен", short: "не проверено", icon: MinusCircleIcon, ink: "text-text-3", bar: "bg-text-3", tint: "", chip: "bg-surface-2 text-text-2" },
+  violation: { icon: XCircleIcon, ink: "text-red", bar: "bg-red", tint: "bg-red-soft", chip: "bg-red-soft text-red" },
+  disputed: { icon: ExclamationTriangleIcon, ink: "text-gold-ink", bar: "bg-gold", tint: "bg-gold-soft", chip: "bg-gold-soft text-gold-ink" },
+  ok: { icon: CheckCircleIcon, ink: "text-green", bar: "bg-green", tint: "", chip: "bg-green-soft text-green" },
+  unchecked: { icon: MinusCircleIcon, ink: "text-text-3", bar: "bg-text-3", tint: "", chip: "bg-surface-2 text-text-2" },
 };
 
 const ORDER: ReviewVerdict[] = ["violation", "disputed", "ok", "unchecked"];
 
-const STAGE: Record<NonNullable<ReviewState["stage"]>, (n: number) => string> = {
-  search: (n) => `Ищу нормы для ${n} ${plural(n, "пункта", "пунктов", "пунктов")}`,
-  review: () => "Сравниваю каждый пункт с нормами",
-  verify: () => "Второй агент перепроверяет нарушения",
-};
-
 type Props = { state: ReviewState; filename: string; onOpen: (row: ReviewRow) => void; onRetry?: () => void };
 
 export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
+  const t = useT();
+  const stage = { search: t.stageSearch(state.clauses.length), review: t.stageReview, verify: t.stageVerify };
   const [problemsOnly, setProblemsOnly] = useState(false);
   const [pdf, setPdf] = useState<"idle" | "busy" | "failed">("idle");
   const [letter, setLetter] = useState(false);
@@ -83,13 +79,13 @@ export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
             <DocumentMagnifyingGlassIcon className="size-6" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="t-eyebrow text-text-3">Проверка договора</p>
+            <p className="t-eyebrow text-text-3">{t.contractReview}</p>
             <h3 className="t-title mt-0.5 truncate">{filename}</h3>
             <p className="t-caption mt-1 text-text-2" aria-live="polite">
               {running ? (
-                <span className="shimmer">{STAGE[state.stage ?? "search"](state.clauses.length)}…</span>
+                <span className="shimmer">{stage[state.stage ?? "search"]}…</span>
               ) : state.status === "error" ? (
-                <span className="text-red">{state.error ?? "Проверка не удалась."}</span>
+                <span className="text-red">{state.error ?? t.reviewFailed}</span>
               ) : (
                 <Summary counts={counts} />
               )}
@@ -101,12 +97,12 @@ export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
 
         {state.status === "done" && (
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            <div className="flex items-center gap-1.5" role="group" aria-label="Какие пункты показать">
+            <div className="flex items-center gap-1.5" role="group" aria-label={t.whichClauses}>
               <FilterChip active={!problemsOnly} onClick={() => setProblemsOnly(false)}>
-                Все {listed.length}
+                {t.all(listed.length)}
               </FilterChip>
               <FilterChip active={problemsOnly} onClick={() => setProblemsOnly(true)} disabled={problems === 0}>
-                Только проблемы {problems}
+                {t.problemsOnly(problems)}
               </FilterChip>
             </div>
             {state.review && (
@@ -115,7 +111,7 @@ export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
                   onClick={async () => {
                     setPdf("busy");
                     try {
-                      downloadFile(await api.reviewPdf(state.review!), `Проверка договора — ${filename.replace(/\.[^.]+$/, "")}.pdf`);
+                      downloadFile(await api.reviewPdf(state.review!), t.pdfFile(filename.replace(/\.[^.]+$/, "")));
                       setPdf("idle");
                     } catch {
                       setPdf("failed");
@@ -124,11 +120,11 @@ export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
                   disabled={pdf === "busy"}
                   icon={<DocumentArrowDownIcon className="size-4" aria-hidden />}
                 >
-                  {pdf === "busy" ? "Готовлю PDF…" : pdf === "failed" ? "PDF: повторить" : "PDF-отчёт"}
+                  {pdf === "busy" ? t.pdfBusy : pdf === "failed" ? t.pdfRetry : t.pdf}
                 </ActionButton>
                 {counts.violation + counts.disputed > 0 && (
                   <ActionButton onClick={() => setLetter(true)} icon={<EnvelopeIcon className="size-4" aria-hidden />}>
-                    Письмо работодателю
+                    {t.letter}
                   </ActionButton>
                 )}
               </div>
@@ -137,7 +133,7 @@ export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
         )}
         {state.status === "error" && onRetry && (
           <button onClick={onRetry} className="pressable t-caption mt-3 rounded-full bg-accent px-3.5 py-1.5 font-semibold text-white">
-            Проверить ещё раз
+            {t.checkAgain}
           </button>
         )}
       </header>
@@ -149,19 +145,19 @@ export function ContractReview({ state, filename, onOpen, onRetry }: Props) {
             <ClauseLine key={c.clause_number} clause={c} row={byNumber.get(c.clause_number)} index={i} onOpen={onOpen} />
           ))}
         </ol>
-        {problemsOnly && shown.length === 0 && <p className="t-body p-5 text-text-2">Проблемных пунктов нет.</p>}
+        {problemsOnly && shown.length === 0 && <p className="t-body p-5 text-text-2">{t.noProblems}</p>}
       </div>
 
       {state.review && (
         <footer className="border-t border-hairline px-5 py-3.5 sm:px-6">
           {state.review.truncated && (
-            <p className="t-caption mb-1.5 text-gold-ink">Проверены первые {listed.length} пунктов: договор длиннее.</p>
+            <p className="t-caption mb-1.5 text-gold-ink">{t.truncated(listed.length)}</p>
           )}
           <p className="t-caption text-text-3">{state.review.disclaimer}</p>
         </footer>
       )}
 
-      <Sheet open={letter} onClose={() => setLetter(false)} label="Письмо работодателю" side>
+      <Sheet open={letter} onClose={() => setLetter(false)} label={t.letter} side>
         {letter && state.review && <LetterView review={state.review} />}
       </Sheet>
     </article>
@@ -202,24 +198,24 @@ function ActionButton({
 
 // A draft the user edits (placeholders in [brackets]) and then copies or saves.
 function LetterView({ review }: { review: Review }) {
+  const t = useT();
   const [text, setText] = useState(() => employerLetter(review));
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 2000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
   }, [copied]);
 
-  const download = () => downloadFile(new Blob([text], { type: "text/plain;charset=utf-8" }), "Письмо работодателю.txt");
+  const download = () => downloadFile(new Blob([text], { type: "text/plain;charset=utf-8" }), t.letterFile);
 
   return (
     <div className="pb-2">
-      <h2 className="t-title pr-10">Письмо работодателю</h2>
-      <p className="t-caption mt-1 text-text-2">
-        Черновик по нарушениям из проверки, со ссылками на статьи. Замените текст в [квадратных скобках] и перечитайте перед отправкой.
-      </p>
+      <h2 className="t-title pr-10">{t.letter}</h2>
+      <p className="t-caption mt-1 text-text-2">{t.letterIntro}</p>
+      {t.letterLangNote && <p className="t-caption mt-1 text-text-3">{t.letterLangNote}</p>}
       <label htmlFor="letter" className="sr-only">
-        Текст письма
+        {t.letterText}
       </label>
       <textarea
         id="letter"
@@ -234,23 +230,23 @@ function LetterView({ review }: { review: Review }) {
           className="pressable t-caption inline-flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 font-semibold text-white"
         >
           {copied ? <CheckIcon className="size-4" aria-hidden /> : <ClipboardDocumentIcon className="size-4" aria-hidden />}
-          {copied ? "Скопировано" : "Скопировать"}
+          {copied ? t.copied : t.copy}
         </button>
         <button
           onClick={download}
           className="pressable t-caption inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3.5 py-1.5 font-semibold text-text"
         >
           <ArrowDownTrayIcon className="size-4" aria-hidden />
-          Скачать .txt
+          {t.downloadTxt}
         </button>
         <button
           onClick={() => setText(employerLetter(review))}
           className="pressable t-caption px-2 py-1.5 font-medium text-text-2 hover:text-text"
         >
-          Вернуть исходный текст
+          {t.resetText}
         </button>
       </div>
-      <p className="t-caption mt-3 text-text-3">Это информационный черновик, а не юридическая консультация. В споре обратитесь к юристу.</p>
+      <p className="t-caption mt-3 text-text-3">{t.letterDisclaimer}</p>
     </div>
   );
 }
@@ -262,11 +258,12 @@ function countRows(rows: ReviewRow[]): Record<ReviewVerdict, number> {
 }
 
 function Summary({ counts }: { counts: Record<ReviewVerdict, number> }) {
+  const t = useT();
   const parts = [
-    counts.violation && `${counts.violation} ${plural(counts.violation, "нарушение", "нарушения", "нарушений")}`,
-    counts.disputed && `${counts.disputed} ${plural(counts.disputed, "спорный пункт", "спорных пункта", "спорных пунктов")}`,
-    counts.ok && `${counts.ok} без нарушений`,
-    counts.unchecked && `${counts.unchecked} не проверено`,
+    counts.violation && t.countViolations(counts.violation),
+    counts.disputed && t.countDisputed(counts.disputed),
+    counts.ok && t.countOk(counts.ok),
+    counts.unchecked && t.countUnchecked(counts.unchecked),
   ].filter(Boolean);
   return <>{parts.join(" · ")}</>;
 }
@@ -335,7 +332,9 @@ function FilterChip({ active, disabled, onClick, children }: { active: boolean; 
 }
 
 function ClauseLine({ clause, row, index, onOpen }: { clause: Clause; row?: ReviewRow; index: number; onOpen: (r: ReviewRow) => void }) {
+  const t = useT();
   const v = row ? VERDICT[row.verdict] : null;
+  const label = row ? t.verdict[row.verdict].label : "";
   const Icon = v?.icon;
   const content = (
     <>
@@ -358,8 +357,8 @@ function ClauseLine({ clause, row, index, onOpen }: { clause: Clause; row?: Revi
             transition={{ ...springSnappy, delay: Math.min(index, 20) * 0.05 }}
           >
             <Icon className="size-5" aria-hidden />
-            <span className="sr-only">{v.label}</span>
-            {row && row.verdict !== "ok" && <span className="t-caption hidden font-semibold sm:inline">{v.label}</span>}
+            <span className="sr-only">{label}</span>
+            {row && row.verdict !== "ok" && <span className="t-caption hidden font-semibold sm:inline">{label}</span>}
           </motion.span>
         )}
       </AnimatePresence>
@@ -369,7 +368,7 @@ function ClauseLine({ clause, row, index, onOpen }: { clause: Clause; row?: Revi
   return (
     <li className={row && v?.tint ? v.tint : ""}>
       {row ? (
-        <button onClick={() => onOpen(row)} className={`${base} transition-colors hover:bg-surface-2/60`} aria-label={`Пункт ${clause.clause_number}: ${v?.label}. Подробнее`}>
+        <button onClick={() => onOpen(row)} className={`${base} transition-colors hover:bg-surface-2/60`} aria-label={t.clauseMore(clause.clause_number, label)}>
           {content}
         </button>
       ) : (
@@ -381,6 +380,7 @@ function ClauseLine({ clause, row, index, onOpen }: { clause: Clause; row?: Revi
 
 /** What the side panel shows for one clause: the verdict, the norm, and a lawful rewording. */
 export function ReviewDetail({ row, onAsk }: { row: ReviewRow; onAsk?: (row: ReviewRow) => void }) {
+  const t = useT();
   const v = VERDICT[row.verdict];
   const [article, setArticle] = useState<string | null>(null);
   const Icon = v.icon;
@@ -389,7 +389,7 @@ export function ReviewDetail({ row, onAsk }: { row: ReviewRow; onAsk?: (row: Rev
     return (
       <div>
         <button onClick={() => setArticle(null)} className="pressable t-caption mb-3 inline-flex items-center gap-1 font-semibold text-accent-ink">
-          <ArrowLeftIcon className="size-4" aria-hidden />К пункту {row.clause_number}
+          <ArrowLeftIcon className="size-4" aria-hidden />{t.backToClause(row.clause_number)}
         </button>
         <CitationView citation={parseCitation(article)} clauses={[]} />
       </div>
@@ -400,32 +400,32 @@ export function ReviewDetail({ row, onAsk }: { row: ReviewRow; onAsk?: (row: Rev
     <div className="pb-2">
       <span className={`t-caption inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-semibold ${v.chip}`}>
         <Icon className="size-4" aria-hidden />
-        {v.label}
+        {t.verdict[row.verdict].label}
       </span>
-      <h2 className="t-title mt-2 pr-10">Пункт {row.clause_number}</h2>
+      <h2 className="t-title mt-2 pr-10">{t.clause(row.clause_number)}</h2>
       <blockquote className="t-body mt-3 rounded-2xl bg-surface-2 px-4 py-3 text-text">«{row.text}»</blockquote>
 
-      <h3 className="t-eyebrow mt-5 text-text-3">Почему</h3>
+      <h3 className="t-eyebrow mt-5 text-text-3">{t.why}</h3>
       <p className="t-body mt-1.5">{row.explanation}</p>
       {row.verified === false && (
         <p className="t-caption mt-2 rounded-xl bg-gold-soft px-3 py-2 text-text">
-          Второй агент не подтвердил этот вывод по найденным нормам — отнеситесь к нему осторожно.
+          {t.notVerified}
         </p>
       )}
 
       {row.norms.length > 0 && (
         <>
-          <h3 className="t-eyebrow mt-5 text-text-3">{row.norms.length > 1 ? "Нормы" : "Норма"}</h3>
+          <h3 className="t-eyebrow mt-5 text-text-3">{row.norms.length > 1 ? t.norms : t.norm}</h3>
           <ul className="mt-1.5 space-y-2.5">
             {row.norms.map((n) => {
               const c = parseCitation(n.citation);
               return (
                 <li key={n.citation} className="border-l-2 border-gold pl-3">
-                  <p className="t-caption font-semibold text-gold-ink">{citationLabel(c)}</p>
+                  <p className="t-caption font-semibold text-gold-ink">{citationLabel(c, t)}</p>
                   <p className="text-[0.9375rem] leading-snug mt-0.5 text-text">{n.text}</p>
                   {c.kind === "law" && (
                     <button onClick={() => setArticle(n.citation)} className="pressable t-caption mt-1 font-semibold text-accent-ink">
-                      Вся статья →
+                      {t.wholeArticle}
                     </button>
                   )}
                 </li>
@@ -437,7 +437,7 @@ export function ReviewDetail({ row, onAsk }: { row: ReviewRow; onAsk?: (row: Rev
 
       {row.fix && (
         <>
-          <h3 className="t-eyebrow mt-5 text-text-3">Как исправить</h3>
+          <h3 className="t-eyebrow mt-5 text-text-3">{t.howToFix}</h3>
           <div className="mt-1.5 rounded-2xl border border-green/30 bg-green-soft px-4 py-3">
             <p className="t-body text-text">{row.fix}</p>
             <CopyFix text={row.fix} />
@@ -451,7 +451,7 @@ export function ReviewDetail({ row, onAsk }: { row: ReviewRow; onAsk?: (row: Rev
           className="pressable t-body mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-hairline bg-surface px-4 py-2.5 font-semibold text-text hover:bg-surface-2"
         >
           <ChatBubbleLeftRightIcon className="size-5 text-accent-ink" aria-hidden />
-          Спросить про этот пункт
+          {t.askAboutClause}
         </button>
       )}
     </div>
@@ -459,6 +459,7 @@ export function ReviewDetail({ row, onAsk }: { row: ReviewRow; onAsk?: (row: Rev
 }
 
 function CopyFix({ text }: { text: string }) {
+  const t = useT();
   const [done, setDone] = useState(false);
   useEffect(() => {
     if (!done) return;
@@ -471,7 +472,7 @@ function CopyFix({ text }: { text: string }) {
       className="pressable t-caption mt-2 inline-flex items-center gap-1.5 font-semibold text-green"
     >
       {done ? <CheckIcon className="size-4" aria-hidden /> : <ClipboardDocumentIcon className="size-4" aria-hidden />}
-      {done ? "Скопировано" : "Скопировать формулировку"}
+      {done ? t.copied : t.copyWording}
     </button>
   );
 }

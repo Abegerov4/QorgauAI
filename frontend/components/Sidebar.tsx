@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import { signOutAction } from "@/app/actions";
 import type { ChatSummary, Me } from "@/lib/api";
 import { groupChats } from "@/lib/history";
-import { plural } from "@/lib/labels";
+import { useT } from "@/lib/i18n";
 import { spring, springSheet, springSnappy } from "@/lib/motion";
 import { Logo, Wordmark } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
@@ -50,6 +50,7 @@ export function Sidebar({
   onHide,
   ...body
 }: Props & { open: boolean; onClose: () => void; hidden: boolean; onHide: () => void }) {
+  const t = useT();
   // Esc closes the phone drawer.
   useEffect(() => {
     if (!open) return;
@@ -69,7 +70,7 @@ export function Sidebar({
             exit={{ x: "-100%" }}
             transition={spring}
             className={`material fixed inset-y-0 left-0 z-40 hidden ${SIDEBAR_WIDTH} border-r border-hairline lg:block`}
-            aria-label="История чатов"
+            aria-label={t.chatHistory}
           >
             <SidebarBody {...body} onHide={onHide} />
           </motion.aside>
@@ -90,7 +91,7 @@ export function Sidebar({
             <motion.aside
               role="dialog"
               aria-modal="true"
-              aria-label="История чатов"
+              aria-label={t.chatHistory}
               initial={{ x: "-100%" }}
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
@@ -129,22 +130,23 @@ function SidebarBody({
   onHide,
   onClose,
 }: Props & { onHide?: () => void; onClose?: () => void }) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const found = chats && q ? chats.filter((c) => c.title.toLowerCase().includes(q)) : chats;
-  const groups = found ? groupChats(found) : [];
+  const groups = found ? groupChats(found, t) : [];
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-15 shrink-0 items-center gap-2 px-4">
         <Logo size={30} />
         <Wordmark />
         {onHide && (
-          <IconButton label="Скрыть историю" onClick={onHide} className="ml-auto">
+          <IconButton label={t.hideHistory} onClick={onHide} className="ml-auto">
             <ChevronDoubleLeftIcon className="size-4" />
           </IconButton>
         )}
         {onClose && (
-          <IconButton label="Закрыть" onClick={onClose} className="ml-auto">
+          <IconButton label={t.close} onClick={onClose} className="ml-auto">
             <XMarkIcon className="size-5" />
           </IconButton>
         )}
@@ -156,12 +158,12 @@ function SidebarBody({
           className="pressable t-body flex w-full items-center justify-center gap-2 rounded-full border border-hairline bg-surface px-4 py-2.5 font-semibold text-text shadow-[var(--shadow-sm)] hover:text-accent-ink"
         >
           <PencilSquareIcon className="size-[18px]" aria-hidden />
-          Новый чат
+          {t.newChat}
         </button>
         {!!chats?.length && (
           <label className="mt-2 flex items-center gap-2 rounded-xl bg-surface-2/70 px-3 py-1.5 focus-within:bg-surface-2">
             <MagnifyingGlassIcon className="size-4 shrink-0 text-text-3" aria-hidden />
-            <span className="sr-only">Поиск по чатам</span>
+            <span className="sr-only">{t.searchChats}</span>
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -171,11 +173,11 @@ function SidebarBody({
                   setQuery("");
                 }
               }}
-              placeholder="Поиск по чатам"
+              placeholder={t.searchChats}
               className="t-body min-w-0 flex-1 bg-transparent outline-none placeholder:text-text-3"
             />
             {query && (
-              <button onClick={() => setQuery("")} className="text-text-3 hover:text-text" aria-label="Очистить поиск">
+              <button onClick={() => setQuery("")} className="text-text-3 hover:text-text" aria-label={t.clearSearch}>
                 <XMarkIcon className="size-4" />
               </button>
             )}
@@ -183,16 +185,16 @@ function SidebarBody({
         )}
       </div>
 
-      <nav className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-4" aria-label="Чаты">
+      <nav className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-4" aria-label={t.chats}>
         {chats === null ? (
-          <div className="space-y-3 px-2 pt-3" aria-label="Загрузка чатов">
+          <div className="space-y-3 px-2 pt-3" aria-label={t.loadingChats}>
             {[80, 65, 90, 55].map((w, i) => (
               <div key={i} className="h-3 animate-pulse rounded-full bg-surface-2" style={{ width: `${w}%` }} />
             ))}
           </div>
         ) : groups.length === 0 ? (
           <p className="t-caption px-2 pt-3 text-text-3">
-            {q ? `Нет чатов с «${query.trim()}» в названии.` : "Здесь появятся ваши чаты: по одному на каждую тему."}
+            {q ? t.noChatsFound(query.trim()) : t.noChatsYet}
           </p>
         ) : (
           groups.map((g) => (
@@ -220,7 +222,7 @@ function SidebarBody({
           {user ? (
             <Account user={user} me={me} />
           ) : (
-            <p className="t-caption min-w-0 flex-1 px-1 text-text-3">Локальный режим, без входа</p>
+            <p className="t-caption min-w-0 flex-1 px-1 text-text-3">{t.localMode}</p>
           )}
           <ThemeToggle />
         </div>
@@ -242,6 +244,7 @@ function ChatRow({
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
 }) {
+  const t = useT();
   const [confirm, setConfirm] = useState(false);
   const [editing, setEditing] = useState(false);
 
@@ -255,7 +258,7 @@ function ChatRow({
     return (
       <li className="relative">
         <label className="sr-only" htmlFor={`rename-${chat.id}`}>
-          Название чата
+          {t.chatName}
         </label>
         <input
           id={`rename-${chat.id}`}
@@ -304,23 +307,23 @@ function ChatRow({
             className="pressable t-caption rounded-lg bg-red-soft px-2 py-1 font-semibold text-red"
             autoFocus
           >
-            Удалить
+            {t.delete}
           </button>
         ) : (
           <>
             <button
               onClick={() => setEditing(true)}
               className="pressable grid size-7 place-items-center rounded-lg text-text-3 opacity-0 group-hover:opacity-100 hover:bg-surface hover:text-text focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-              aria-label={`Переименовать чат «${chat.title}»`}
-              title="Переименовать"
+              aria-label={t.renameChat(chat.title)}
+              title={t.rename}
             >
               <PencilIcon className="size-3.5" />
             </button>
             <button
               onClick={() => setConfirm(true)}
               className="pressable grid size-7 place-items-center rounded-lg text-text-3 opacity-0 group-hover:opacity-100 hover:bg-red-soft hover:text-red focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-              aria-label={`Удалить чат «${chat.title}»`}
-              title="Удалить чат"
+              aria-label={t.deleteChatNamed(chat.title)}
+              title={t.deleteChat}
             >
               <TrashIcon className="size-4" />
             </button>
@@ -332,6 +335,7 @@ function ChatRow({
 }
 
 function Account({ user, me }: { user: SignedInUser; me: Me | null }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -351,8 +355,8 @@ function Account({ user, me }: { user: SignedInUser; me: Me | null }) {
     me === null
       ? user.email
       : left === null
-        ? `Администратор · сегодня ${me.questions_today}`
-        : `Осталось ${left} ${plural(left, "вопрос", "вопроса", "вопросов")} из ${me.daily_limit}`;
+        ? t.adminToday(me.questions_today)
+        : t.questionsLeft(left, me.daily_limit!);
 
   return (
     <div ref={root} className="relative min-w-0 flex-1">
@@ -360,7 +364,7 @@ function Account({ user, me }: { user: SignedInUser; me: Me | null }) {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label="Меню аккаунта"
+        aria-label={t.accountMenu}
         className="pressable flex w-full items-center gap-2.5 rounded-xl p-1.5 text-left hover:bg-surface-2"
       >
         <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-accent-soft font-semibold text-accent-ink">
@@ -392,7 +396,7 @@ function Account({ user, me }: { user: SignedInUser; me: Me | null }) {
               {me?.role === "admin" && (
                 <Link href="/admin" role="menuitem" className="t-body flex items-center gap-2 rounded-xl px-2.5 py-2 hover:bg-surface-2">
                   <ChartBarIcon className="size-4 text-text-2" aria-hidden />
-                  Статистика
+                  {t.stats}
                 </Link>
               )}
               <form action={signOutAction}>
@@ -402,7 +406,7 @@ function Account({ user, me }: { user: SignedInUser; me: Me | null }) {
                   className="t-body flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-red hover:bg-red-soft"
                 >
                   <ArrowRightStartOnRectangleIcon className="size-4" aria-hidden />
-                  Выйти
+                  {t.signOut}
                 </button>
               </form>
             </div>

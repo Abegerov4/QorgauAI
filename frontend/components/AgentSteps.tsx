@@ -4,7 +4,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { useId, useState } from "react";
 import type { AskResponse, ToolCall } from "@/lib/api";
 import { citationLabel, parseCitation, type Citation } from "@/lib/citations";
-import { plural } from "@/lib/labels";
+import type { Dict } from "@/lib/dict";
+import { useT } from "@/lib/i18n";
 import { CitationChip } from "./CitationChip";
 import { spring, springSnappy } from "@/lib/motion";
 
@@ -37,60 +38,49 @@ type Step = { key: string; tone: "done" | "active" | "warn"; title: string; deta
 
 const MAX_CHIPS = 4;
 
-// The step that is still running reads in the present tense.
-const RUNNING: Record<string, string> = {
-  guard_input: "Проверяю запрос",
-  research: "Ищу нормы в законе",
-  generate: "Пишу ответ со ссылками на нормы",
-  verify: "Второй агент проверяет утверждения",
-  finalize: "Собираю ответ",
-};
-
-function buildSteps(trace: Trace, live: boolean): Step[] {
+// The step that is still running reads in the present tense (t.stepRunning).
+function buildSteps(trace: Trace, live: boolean, t: Dict): Step[] {
   let research = 0;
   let verify = 0;
   const steps = trace.path.map((node, i): Step => {
     const key = `${node}-${i}`;
     switch (node) {
       case "guard_input":
-        return { key, tone: "done", title: "Проверил запрос", detail: "ИИН, телефоны и счета скрыты до отправки в модель" };
+        return { key, tone: "done", title: t.stepGuard, detail: t.stepGuardDetail };
       case "research": {
-        const tools = trace.tools.filter((t) => t.attempt === research);
+        const tools = trace.tools.filter((x) => x.attempt === research);
         research += 1;
-        const searches = tools.filter((t) => t.name === "search_legal_corpus").length;
-        const articles = tools.filter((t) => t.name === "get_article").length;
-        const parts = [
-          searches && `${searches} ${plural(searches, "поиск", "поиска", "поисков")}`,
-          articles && `${articles} ${plural(articles, "статья", "статьи", "статей")}`,
-        ].filter(Boolean);
+        const searches = tools.filter((x) => x.name === "search_legal_corpus").length;
+        const articles = tools.filter((x) => x.name === "get_article").length;
+        const parts = [searches && t.searches(searches), articles && t.articles(articles)].filter(Boolean);
         return {
           key,
           tone: "done",
-          title: research > 1 ? "Искал нормы ещё раз" : "Искал нормы в законе",
+          title: research > 1 ? t.stepResearchAgain : t.stepResearch,
           detail: parts.join(" · ") || undefined,
           tools,
         };
       }
       case "generate":
-        return { key, tone: "done", title: "Написал ответ со ссылками на нормы" };
+        return { key, tone: "done", title: t.stepGenerate };
       case "verify": {
         const v = trace.verified[verify];
         verify += 1;
         return {
           key,
           tone: v && v.supported < v.checked ? "warn" : "done",
-          title: "Второй агент проверил утверждения",
-          detail: v ? `Подтверждено ${v.supported} из ${v.checked}` : undefined,
+          title: t.stepVerify,
+          detail: v ? t.stepVerifyDetail(v.supported, v.checked) : undefined,
         };
       }
       case "rewrite_query":
-        return { key, tone: "warn", title: "Не всё подтвердилось — уточняю поиск" };
+        return { key, tone: "warn", title: t.stepRewrite };
       case "finalize":
         return {
           key,
           tone: "done",
-          title: "Собрал ответ",
-          detail: trace.removed ? `Убрал без подтверждения: ${trace.removed}` : undefined,
+          title: t.stepFinalize,
+          detail: trace.removed ? t.stepFinalizeDetail(trace.removed) : undefined,
         };
       default:
         return { key, tone: "done", title: node };
@@ -100,7 +90,7 @@ function buildSteps(trace: Trace, live: boolean): Step[] {
     const last = steps[steps.length - 1];
     const node = trace.path[trace.path.length - 1];
     last.tone = "active";
-    last.title = RUNNING[node] ?? last.title;
+    last.title = t.stepRunning[node] ?? last.title;
   }
   return steps;
 }
@@ -108,9 +98,10 @@ function buildSteps(trace: Trace, live: boolean): Step[] {
 type ListProps = { trace: Trace; live?: boolean; onCite?: (c: Citation) => void };
 
 export function AgentStepList({ trace, live = false, onCite }: ListProps) {
-  const steps = buildSteps(trace, live);
+  const t = useT();
+  const steps = buildSteps(trace, live, t);
   return (
-    <ol className="space-y-0" aria-label="Шаги агента">
+    <ol className="space-y-0" aria-label={t.agentSteps}>
       <AnimatePresence initial={false}>
         {steps.map((s, i) => (
           <motion.li
@@ -127,8 +118,8 @@ export function AgentStepList({ trace, live = false, onCite }: ListProps) {
               {s.detail && <p className="t-caption mt-0.5 text-text-2">{s.detail}</p>}
               {s.tools && s.tools.length > 0 && (
                 <ul className="mt-2 space-y-2">
-                  {s.tools.map((t, j) => (
-                    <ToolRow key={j} tool={t} onCite={onCite} />
+                  {s.tools.map((tool, j) => (
+                    <ToolRow key={j} tool={tool} onCite={onCite} />
                   ))}
                 </ul>
               )}
@@ -141,17 +132,18 @@ export function AgentStepList({ trace, live = false, onCite }: ListProps) {
 }
 
 function ToolRow({ tool, onCite }: { tool: ToolCall; onCite?: (c: Citation) => void }) {
+  const t = useT();
   let icon: React.ReactNode;
   let text: React.ReactNode;
   if (tool.name === "search_legal_corpus") {
     icon = <path d="M7 12.5a5.5 5.5 0 100-11 5.5 5.5 0 000 11zM11 11l3.5 3.5" />;
-    text = <>Поиск «{String(tool.args.query ?? "")}»</>;
+    text = <>{t.toolSearch} «{String(tool.args.query ?? "")}»</>;
   } else if (tool.name === "get_article") {
     icon = <path d="M2 3.5c2-1 4-1 6 .5 2-1.5 4-1.5 6-.5v9c-2-1-4-1-6 .5-2-1.5-4-1.5-6-.5zM8 4v9" />;
-    text = "Прочитал статью целиком";
+    text = t.toolArticle;
   } else {
     icon = <path d="M3.5 1.5h9a1 1 0 011 1v11a1 1 0 01-1 1h-9a1 1 0 01-1-1v-11a1 1 0 011-1zM5 4.5h6M5.5 8h.01M8 8h.01M10.5 8h.01M5.5 11h.01M8 11h.01M10.5 11h.01" />;
-    text = <>Посчитал отпуск{tool.result ? `: ${tool.result}` : ""}</>;
+    text = <>{t.toolCalc}{tool.result ? `: ${tool.result}` : ""}</>;
   }
   const chips = tool.found.slice(0, MAX_CHIPS);
   const more = tool.found.length - chips.length;
@@ -182,23 +174,24 @@ function ToolRow({ tool, onCite }: { tool: ToolCall; onCite?: (c: Citation) => v
               <CitationChip key={raw} raw={raw} onCite={onCite} className={`pressable ${cls} hover:bg-accent-soft`} />
             ) : (
               <span key={raw} title={raw} className={cls}>
-                {citationLabel(parseCitation(raw))}
+                {citationLabel(parseCitation(raw), t)}
               </span>
             );
           })}
           {more > 0 && <span className="t-caption px-1 py-0.5 text-text-3">+{more}</span>}
         </div>
       ) : (
-        tool.name === "search_legal_corpus" && <p className="t-caption mt-1 text-text-3">Ничего не нашлось</p>
+        tool.name === "search_legal_corpus" && <p className="t-caption mt-1 text-text-3">{t.nothingFound}</p>
       )}
     </li>
   );
 }
 
 function StepIcon({ tone }: { tone: Step["tone"] }) {
+  const t = useT();
   if (tone === "active") {
     return (
-      <span className="relative mt-0.5 grid size-[19px] shrink-0 place-items-center" aria-label="Выполняется">
+      <span className="relative mt-0.5 grid size-[19px] shrink-0 place-items-center" aria-label={t.running}>
         <span className="absolute inset-0 animate-spin rounded-full border-2 border-accent-soft border-t-accent-ink motion-reduce:animate-none" />
       </span>
     );
@@ -224,14 +217,15 @@ function StepIcon({ tone }: { tone: Step["tone"] }) {
 
 /** Collapsible "how the agent found this" block under an answer. */
 export function AgentSteps({ trace, onCite }: { trace: Trace; onCite: (c: Citation) => void }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const id = useId();
-  const searches = trace.tools.filter((t) => t.name === "search_legal_corpus").length;
-  const articles = trace.tools.filter((t) => t.name === "get_article").length;
+  const searches = trace.tools.filter((x) => x.name === "search_legal_corpus").length;
+  const articles = trace.tools.filter((x) => x.name === "get_article").length;
   const summary = [
-    searches && `${searches} ${plural(searches, "поиск", "поиска", "поисков")}`,
-    articles && `${articles} ${plural(articles, "статья", "статьи", "статей")}`,
-    trace.path.includes("rewrite_query") && "повторный поиск",
+    searches && t.searches(searches),
+    articles && t.articles(articles),
+    trace.path.includes("rewrite_query") && t.retrySearch,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -253,7 +247,7 @@ export function AgentSteps({ trace, onCite }: { trace: Trace; onCite: (c: Citati
           </svg>
         </span>
         <span className="min-w-0 flex-1">
-          <span className="t-body block leading-snug font-medium">Как агент искал ответ</span>
+          <span className="t-body block leading-snug font-medium">{t.howAgentSearched}</span>
           {summary && <span className="t-caption block text-text-3">{summary}</span>}
         </span>
         <motion.svg width="12" height="12" viewBox="0 0 10 10" animate={{ rotate: open ? 90 : 0 }} transition={spring} className="text-text-3" aria-hidden>

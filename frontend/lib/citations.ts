@@ -4,6 +4,8 @@
 //   "Договор пользователя, пункт 6"
 //   "Калькулятор отпуска по нормам: ..."
 
+import type { Dict } from "./dict";
+
 export type CodeKey = "labor_code" | "constitution";
 
 export type Citation =
@@ -28,9 +30,19 @@ export function parseCitation(raw: string): Citation {
   return { kind: "law", raw, codeKey, codeShort: CODE_SHORT[codeKey], article: article[1], point };
 }
 
-export function citationLabel(c: Citation): string {
-  if (c.kind === "doc") return `Договор, п. ${c.clause}`;
-  if (c.kind === "tool") return "Калькулятор";
-  const point = c.point.replace(/Пункт\s+/i, "п. ").replace(/подпункт\s+/i, "пп. ");
-  return `${c.codeShort === "Конституция" ? "Конст." : "ТК"} ст. ${c.article}${point ? `, ${point}` : ""}`;
+/** Short reference for a chip: "ТК ст. 36, п. 2" / "ЕК 36-бап, 2-тармақ" / "LC art. 36, p. 2". */
+export function citationLabel(c: Citation, t: Dict): string {
+  if (c.kind === "doc") return t.cite.contract(c.clause);
+  if (c.kind === "tool") return t.calculatorShort;
+  const parts = c.point
+    .split(/,\s*/)
+    .filter(Boolean)
+    .map((p) => {
+      const sub = p.match(/^подпункт\s+(.+)$/i);
+      if (sub) return t.cite.subpoint(sub[1]);
+      const point = p.match(/^Пункт\s+(.+)$/i);
+      return point ? t.cite.point(point[1]) : p;
+    });
+  const code = c.codeKey === "constitution" ? t.cite.constitution : t.cite.labor;
+  return t.cite.ref(code, c.article, parts.join(", "));
 }

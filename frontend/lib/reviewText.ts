@@ -4,6 +4,7 @@
 
 import type { ContractReview, ReviewRow } from "./api";
 import { parseCitation } from "./citations";
+import type { Dict } from "./dict";
 
 const CODE_GENITIVE = { labor_code: "Трудового кодекса РК", constitution: "Конституции РК" } as const;
 
@@ -71,9 +72,9 @@ export function employerLetter(review: ContractReview): string {
   return lines.join("\n");
 }
 
-export function clauseQuestion(row: ReviewRow): string {
-  const quote = `Пункт ${row.clause_number} моего трудового договора: «${clip(row.text, 1500)}».`;
-  if (row.verdict === "violation") return `${quote} Проверка отметила его как нарушение. Что требует закон и как мне поступить?`;
-  if (row.verdict === "disputed") return `${quote} Проверка отметила его как спорный. Что об этом говорит закон и на что обратить внимание?`;
-  return `${quote} Что об этом говорит Трудовой кодекс РК?`;
+export function clauseQuestion(row: ReviewRow, t: Dict): string {
+  const quote = t.clauseAsk.quote(row.clause_number, clip(row.text, 1500));
+  if (row.verdict === "violation") return `${quote} ${t.clauseAsk.violation}`;
+  if (row.verdict === "disputed") return `${quote} ${t.clauseAsk.disputed}`;
+  return `${quote} ${t.clauseAsk.ok}`;
 }

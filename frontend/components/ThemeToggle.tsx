@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useSyncExternalStore } from "react";
+import { useT } from "@/lib/i18n";
 import { currentTheme, onThemeChange, setTheme, syncThemeColor } from "@/lib/theme";
 
 // Sliding light/dark switch (adapted from a 21st.dev theme toggle): the moon
 // sits on the left, the sun on the right, and the knob slides under whichever
 // theme is on.
 export function ThemeToggle({ className = "" }: { className?: string }) {
+  const t = useT();
   // The server cannot know the theme; React re-renders with the real one
   // right after hydration.
   const theme = useSyncExternalStore(onThemeChange, currentTheme, () => null);
@@ -21,8 +23,8 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
       type="button"
       role="switch"
       aria-checked={dark}
-      aria-label="Тёмная тема"
-      title={dark ? "Включить светлую тему" : "Включить тёмную тему"}
+      aria-label={t.themeLabel}
+      title={dark ? t.themeToLight : t.themeToDark}
       onClick={() => setTheme(dark ? "light" : "dark")}
       className={`pressable relative flex h-8 w-15 shrink-0 items-center justify-between rounded-full border border-hairline bg-surface-2/70 p-1 ${className}`}
     >

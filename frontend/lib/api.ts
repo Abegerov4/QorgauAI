@@ -2,6 +2,8 @@
 // backend directly (CORS is open) instead of a Next rewrite: /ask can take
 // 20-60 s, longer than a dev proxy is happy to wait.
 
+import { currentLang, getT } from "./i18n";
+
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export type AnswerStatus = "answered" | "partial" | "refused";
@@ -165,7 +167,7 @@ async function authHeaders(): Promise<Record<string, string>> {
   const now = Date.now() / 1000;
   if (!cached || (cached.token && cached.expiresAt - 60 < now)) {
     const resp = await fetch("/api/token", { cache: "no-store" });
-    if (resp.status === 401) throw new ApiError(401, "Сессия истекла. Обновите страницу и войдите снова.");
+    if (resp.status === 401) throw new ApiError(401, getT().errSession);
     cached = resp.status === 204 ? { token: null, expiresAt: Infinity } : ((await resp.json()) as { token: string; expiresAt: number });
   }
   return cached.token ? { Authorization: `Bearer ${cached.token}` } : {};
@@ -181,17 +183,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     resp = await fetch(API_URL + path, withAuth(init, headers));
   } catch {
-    throw new ApiError(0, `Сервер недоступен (${API_URL}). Попробуйте через минуту.`);
+    throw new ApiError(0, getT().errUnavailable);
   }
   if (!resp.ok) {
-    let detail = `Ошибка сервера (${resp.status})`;
-    try {
-      const body = await resp.json();
-      if (typeof body.detail === "string") detail = body.detail;
-    } catch {}
-    throw new ApiError(resp.status, detail);
+    throw new ApiError(resp.status, await errorDetail(resp));
   }
   return (resp.status === 204 ? undefined : resp.json()) as Promise<T>;
+}
+
+// The server words its errors in Russian. In another language the common
+// ones get a translated message by status; the rest show the status code.
+async function errorDetail(resp: Response): Promise<string> {
+  const t = getT();
+  let detail: string | null = null;
+  try {
+    const body = await resp.json();
+    if (typeof body.detail === "string") detail = body.detail;
+  } catch {}
+  if (currentLang() === "ru") return detail ?? t.errServer(resp.status);
+  if (resp.status === 401) return t.errSession;
+  if (resp.status === 403) return t.errBlocked;
+  if (resp.status === 429) return t.errLimit;
+  return t.errServer(resp.status);
 }
 
 async function* sseEvents(resp: Response): AsyncGenerator<{ event: string; data: unknown }> {
@@ -226,15 +239,10 @@ async function openStream(path: string, body: unknown, signal?: AbortSignal): Pr
     resp = await fetch(API_URL + path, withAuth(init, await authHeaders()));
   } catch (e) {
     if (signal?.aborted) throw e;
-    throw new ApiError(0, `Сервер недоступен (${API_URL}). Попробуйте через минуту.`);
+    throw new ApiError(0, getT().errUnavailable);
   }
   if (!resp.ok || !resp.body) {
-    let detail = `Ошибка сервера (${resp.status})`;
-    try {
-      const data = await resp.json();
-      if (typeof data.detail === "string") detail = data.detail;
-    } catch {}
-    throw new ApiError(resp.status, detail);
+    throw new ApiError(resp.status, await errorDetail(resp));
   }
   return resp;
 }
@@ -243,11 +251,11 @@ export const api = {
   // Public: the header shows it before (and without) sign-in.
   health: async () => {
     const resp = await fetch(API_URL + "/health");
-    if (!resp.ok) throw new ApiError(resp.status, "Бэкенд недоступен");
+    if (!resp.ok) throw new ApiError(resp.status, getT().statusOffline);
     return (await resp.json()) as Health;
   },
   ask: (question: string, sessionId: string, documentId?: string, signal?: AbortSignal) =>
-    request<AskResponse>("/ask", { ...json({ question, session_id: sessionId, document_id: documentId }), signal }),
+    request<AskResponse>("/ask", { ...json({ question, session_id: sessionId, document_id: documentId, lang: currentLang() }), signal }),
   /** Pipeline C with live progress: Server-Sent Events over a POST. */
   askStream: async (
     question: string,
@@ -256,22 +264,23 @@ export const api = {
     onEvent: (e: AgentEvent) => void,
     signal?: AbortSignal,
   ): Promise<AskResponse> => {
-    const resp = await openStream("/ask/stream", { question, session_id: sessionId, document_id: documentId }, signal);
+    const resp = await openStream("/ask/stream", { question, session_id: sessionId, document_id: documentId, lang: currentLang() }, signal);
     for await (const { event, data } of sseEvents(resp)) {
       if (event === "final") return data as AskResponse;
-      if (event === "error") throw new ApiError(500, "Агент завершился с ошибкой. Попробуйте ещё раз.");
+      if (event === "error") throw new ApiError(500, getT().errAgent);
       onEvent({ type: event, ...(data as object) } as AgentEvent);
     }
-    throw new ApiError(500, "Соединение прервалось до ответа.");
+    throw new ApiError(500, getT().errDropped);
   },
   reviewStream: async (documentId: string, onEvent: (e: ReviewEvent) => void, signal?: AbortSignal): Promise<ContractReview> => {
-    const resp = await openStream(`/documents/${encodeURIComponent(documentId)}/review`, undefined, signal);
+    const path = `/documents/${encodeURIComponent(documentId)}/review?lang=${currentLang()}`;
+    const resp = await openStream(path, undefined, signal);
     for await (const { event, data } of sseEvents(resp)) {
       if (event === "final") return data as ContractReview;
-      if (event === "error") throw new ApiError(500, "Проверка завершилась с ошибкой. Попробуйте ещё раз.");
+      if (event === "error") throw new ApiError(500, getT().errReview);
       onEvent({ type: event, ...(data as object) } as ReviewEvent);
     }
-    throw new ApiError(500, "Соединение прервалось до конца проверки.");
+    throw new ApiError(500, getT().errReviewDropped);
   },
   /** The finished review as a PDF file, rendered by the server. */
   reviewPdf: async (review: ContractReview): Promise<Blob> => {
@@ -279,9 +288,9 @@ export const api = {
     try {
       resp = await fetch(API_URL + "/reports/contract-review", withAuth(json(review), await authHeaders()));
     } catch {
-      throw new ApiError(0, `Сервер недоступен (${API_URL}). Попробуйте через минуту.`);
+      throw new ApiError(0, getT().errUnavailable);
     }
-    if (!resp.ok) throw new ApiError(resp.status, `Не удалось подготовить PDF (${resp.status}). Попробуйте ещё раз.`);
+    if (!resp.ok) throw new ApiError(resp.status, getT().errPdf(resp.status));
     return resp.blob();
   },
   upload: (file: File) => {

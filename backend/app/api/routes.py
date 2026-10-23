@@ -16,6 +16,7 @@ from app.accounts import service as accounts
 from app.accounts.auth import User, admin_user, current_user
 from app.agents.cost import CURRENT, Meter
 from app.agents.graph import answer_question
+from app.agents.lang import Lang
 from app.agents.review import review_document
 from app.api.schemas import (
     AdminUserUpdate,
@@ -134,7 +135,13 @@ async def ask(req: AskRequest, request: Request, user: User = Depends(current_us
     token = CURRENT.set(meter)
     try:
         state = await answer_question(
-            graph, req.question, document=document, session_id=req.session_id, user_id=user.email, tags=["api"]
+            graph,
+            req.question,
+            document=document,
+            session_id=req.session_id,
+            user_id=user.email,
+            tags=["api"],
+            lang=req.lang,
         )
     except Exception:
         accounts.log_question(user, req.question, "error", None, meter.usd)
@@ -171,6 +178,7 @@ async def ask_stream(req: AskRequest, request: Request, user: User = Depends(cur
                 user_id=user.email,
                 tags=["api", "stream"],
                 on_event=on_event,
+                lang=req.lang,
             )
             response = AskResponse.from_state(state)
             accounts.log_question(user, req.question, response.status, response.trace_id, meter.usd)
@@ -232,7 +240,7 @@ async def upload_document(file: UploadFile, user: User = Depends(current_user)) 
 
 
 @router.post("/documents/{document_id}/review")
-async def review(document_id: str, user: User = Depends(current_user)) -> StreamingResponse:
+async def review(document_id: str, lang: Lang = "ru", user: User = Depends(current_user)) -> StreamingResponse:
     """Colour-coded review of an uploaded contract, as Server-Sent Events:
     `stage` (search / review / verify), one `clause` per clause with its
     verdict, then `final` (the whole review) or `error`. Counts as a question
@@ -249,7 +257,7 @@ async def review(document_id: str, user: User = Depends(current_user)) -> Stream
         meter = Meter()
         CURRENT.set(meter)
         try:
-            result = await review_document(document, on_event=on_event, user_id=user.email)
+            result = await review_document(document, on_event=on_event, user_id=user.email, lang=lang)
             accounts.log_question(user, label, "review", result["trace_id"], meter.usd)
             await queue.put(("final", result))
         except asyncio.CancelledError:

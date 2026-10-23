@@ -7,16 +7,16 @@ import { useEffect, useState } from "react";
 import type { AnswerStatus, AskResponse } from "@/lib/api";
 import { answerAsText } from "@/lib/answerText";
 import { parseCitation, type Citation } from "@/lib/citations";
-import { plural } from "@/lib/labels";
+import { useT } from "@/lib/i18n";
 import { spring } from "@/lib/motion";
 import { AgentSteps, traceFromAnswer } from "./AgentSteps";
 import { CitationChip } from "./CitationChip";
 import { countWords, GenerateText } from "./GenerateText";
 
-const STATUS: Record<AnswerStatus, { label: string; tone: string }> = {
-  answered: { label: "Подтверждено нормами", tone: "bg-green-soft text-green" },
-  partial: { label: "Подтверждено частично", tone: "bg-gold-soft text-gold-ink" },
-  refused: { label: "Нет подтверждённого ответа", tone: "bg-surface-2 text-text-2" },
+const TONE: Record<AnswerStatus, string> = {
+  answered: "bg-green-soft text-green",
+  partial: "bg-gold-soft text-gold-ink",
+  refused: "bg-surface-2 text-text-2",
 };
 
 type Props = {
@@ -42,7 +42,11 @@ const CLAIM_PAUSE = 0.12;
 const revealed = new WeakSet<AskResponse>();
 
 export function AnswerCard({ answer, seconds, onCite, question, fresh, feedback, onRate }: Props) {
-  const status = STATUS[answer.status];
+  const t = useT();
+  const status = {
+    label: { answered: t.statusAnswered, partial: t.statusPartial, refused: t.statusRefused }[answer.status],
+    tone: TONE[answer.status],
+  };
   const reduced = useReducedMotion();
   const [firstTime] = useState(() => fresh && !revealed.has(answer));
   const animate = firstTime && !reduced;
@@ -63,8 +67,8 @@ export function AnswerCard({ answer, seconds, onCite, question, fresh, feedback,
     <article className="card p-5 sm:p-6">
       <div className="flex flex-wrap items-center gap-2">
         <span className={`t-caption rounded-full px-2.5 py-1 font-semibold ${status.tone}`}>{status.label}</span>
-        <span className="t-caption text-text-3">{seconds.toFixed(0)} с</span>
-        <CopyButton text={() => answerAsText(answer, question)} />
+        <span className="t-caption text-text-3">{t.seconds(seconds.toFixed(0))}</span>
+        <CopyButton text={() => answerAsText(answer, t, question)} />
       </div>
 
       {answer.claims.length === 0 ? (
@@ -90,13 +94,13 @@ export function AnswerCard({ answer, seconds, onCite, question, fresh, feedback,
         {answer.recommend_lawyer && (
           <div className="t-caption mt-5 flex gap-2.5 rounded-2xl bg-gold-soft p-3.5 text-text">
             <span aria-hidden className="text-gold-ink">●</span>
-            <span>Ситуация спорная или с высокой ценой ошибки — стоит показать её практикующему юристу.</span>
+            <span>{t.lawyer}</span>
           </div>
         )}
 
         {answer.missing_info.length > 0 && (
           <section className="mt-5">
-            <h3 className="t-eyebrow text-text-3">Что осталось за рамками ответа</h3>
+            <h3 className="t-eyebrow text-text-3">{t.missing}</h3>
             <ul className="t-body mt-2 space-y-1 text-text-2">
               {answer.missing_info.map((m, i) => (
                 <li key={i} className="flex gap-2">
@@ -157,6 +161,7 @@ function Claim({ text, sources, onCite, lead, reveal }: ClaimProps) {
 }
 
 function RemovedClaims({ claims }: { claims: string[] }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const n = claims.length;
   return (
@@ -169,7 +174,7 @@ function RemovedClaims({ claims }: { claims: string[] }) {
         <motion.svg width="10" height="10" viewBox="0 0 10 10" animate={{ rotate: open ? 90 : 0 }} transition={spring} aria-hidden>
           <path d="M3 1.5L6.5 5 3 8.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" />
         </motion.svg>
-        Проверяющий агент убрал {n} {plural(n, "утверждение", "утверждения", "утверждений")} без подтверждения в законе
+        {t.removed(n)}
       </button>
       <AnimatePresence initial={false}>
         {open && (
@@ -193,6 +198,7 @@ function RemovedClaims({ claims }: { claims: string[] }) {
 }
 
 function CopyButton({ text }: { text: () => string }) {
+  const t = useT();
   const [state, setState] = useState<"idle" | "done" | "failed">("idle");
   useEffect(() => {
     if (state === "idle") return;
@@ -213,8 +219,8 @@ function CopyButton({ text }: { text: () => string }) {
     <button
       onClick={copy}
       className="pressable t-caption ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium text-text-2 hover:bg-surface-2 hover:text-text"
-      title="Скопировать ответ со ссылками на статьи"
-      aria-label={state === "done" ? "Скопировано" : "Копировать ответ"}
+      title={t.copyAnswerTitle}
+      aria-label={state === "done" ? t.copied : t.copyAnswer}
     >
       {state === "done" ? (
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-green" aria-hidden>
@@ -228,13 +234,14 @@ function CopyButton({ text }: { text: () => string }) {
       )}
       {/* On a phone only the icon fits next to the status. */}
       <span className="hidden sm:inline" aria-live="polite">
-        {state === "done" ? "Скопировано" : state === "failed" ? "Не удалось" : "Копировать"}
+        {state === "done" ? t.copied : state === "failed" ? t.failed : t.copy}
       </span>
     </button>
   );
 }
 
 function Feedback({ value, onRate }: { value?: "up" | "down"; onRate: (helpful: boolean, comment?: string) => void }) {
+  const t = useT();
   const [comment, setComment] = useState("");
   const [sent, setSent] = useState(false);
   const thumb = (up: boolean) => {
@@ -248,8 +255,8 @@ function Feedback({ value, onRate }: { value?: "up" | "down"; onRate: (helpful: 
           onRate(up);
         }}
         aria-pressed={active}
-        aria-label={up ? "Полезный ответ" : "Бесполезный ответ"}
-        title={up ? "Полезный ответ" : "Бесполезный ответ"}
+        aria-label={up ? t.helpful : t.notHelpful}
+        title={up ? t.helpful : t.notHelpful}
         className={`pressable grid size-8 place-items-center rounded-full ${
           active ? (up ? "bg-green-soft text-green" : "bg-red-soft text-red") : "text-text-2 hover:bg-surface-2 hover:text-text"
         }`}
@@ -262,7 +269,7 @@ function Feedback({ value, onRate }: { value?: "up" | "down"; onRate: (helpful: 
   return (
     <section className="mt-5">
       <div className="flex items-center gap-1">
-        <span className="t-caption mr-1 text-text-2">{value ? "Спасибо за оценку" : "Ответ был полезен?"}</span>
+        <span className="t-caption mr-1 text-text-2">{value ? t.thanks : t.wasHelpful}</span>
         {thumb(true)}
         {thumb(false)}
       </div>
@@ -283,18 +290,18 @@ function Feedback({ value, onRate }: { value?: "up" | "down"; onRate: (helpful: 
           >
             <div className="flex gap-2 pt-2">
               <label htmlFor="feedback-comment" className="sr-only">
-                Что не так с ответом
+                {t.whatsWrong}
               </label>
               <input
                 id="feedback-comment"
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 maxLength={1000}
-                placeholder="Что не так? Например: не та статья"
+                placeholder={t.whatsWrongPlaceholder}
                 className="t-caption min-w-0 flex-1 rounded-full border border-hairline bg-surface px-3.5 py-2 outline-none focus-visible:border-accent-ink"
               />
-              <button type="submit" disabled={!comment.trim()} aria-label="Отправить отзыв" className="pressable t-caption rounded-full bg-accent px-3.5 py-2 font-semibold text-white disabled:bg-surface-2 disabled:text-text-3">
-                Отправить
+              <button type="submit" disabled={!comment.trim()} aria-label={t.sendFeedback} className="pressable t-caption rounded-full bg-accent px-3.5 py-2 font-semibold text-white disabled:bg-surface-2 disabled:text-text-3">
+                {t.send}
               </button>
             </div>
           </motion.form>

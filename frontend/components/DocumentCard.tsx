@@ -4,11 +4,12 @@ import { DocumentMagnifyingGlassIcon } from "@heroicons/react/20/solid";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import type { DocumentResponse } from "@/lib/api";
-import { DOC_TYPE_LABELS, PII_LABELS, TOPIC_LABELS, plural } from "@/lib/labels";
+import { useT } from "@/lib/i18n";
 import { spring } from "@/lib/motion";
 
 // `onReview` is set until the contract has been reviewed once in this chat.
 export function DocumentCard({ doc, onReview, disabled }: { doc: DocumentResponse; onReview?: () => void; disabled?: boolean }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const vision = doc.pages.filter((p) => p.method === "vision").length;
   const pages = doc.pages.length;
@@ -20,12 +21,10 @@ export function DocumentCard({ doc, onReview, disabled }: { doc: DocumentRespons
           <DocIcon />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="t-eyebrow text-text-3">{DOC_TYPE_LABELS[doc.document_type] ?? "Документ"}</p>
+          <p className="t-eyebrow text-text-3">{t.docTypes[doc.document_type] ?? t.document}</p>
           <h3 className="t-title mt-0.5 truncate">{doc.filename}</h3>
           <p className="t-caption mt-1 text-text-2">
-            {pages} {plural(pages, "страница", "страницы", "страниц")}
-            {vision > 0 ? ` · ${vision} распознано Vision OCR` : " · текстовый слой"} · {doc.clauses.length}{" "}
-            {plural(doc.clauses.length, "пункт", "пункта", "пунктов")}
+            {t.pages(pages)} · {vision > 0 ? t.visionPages(vision) : t.textLayer} · {t.clausesCount(doc.clauses.length)}
           </p>
         </div>
       </div>
@@ -34,7 +33,7 @@ export function DocumentCard({ doc, onReview, disabled }: { doc: DocumentRespons
         <p className="t-caption mt-4 flex gap-2 rounded-2xl bg-green-soft px-3.5 py-2.5 text-text">
           <LockIcon />
           <span>
-            Скрыто до отправки в модель: {doc.pii_found.map((k) => PII_LABELS[k] ?? k).join(", ")}
+            {t.hiddenPii} {doc.pii_found.map((k) => t.pii[k] ?? k).join(", ")}
           </span>
         </p>
       )}
@@ -47,7 +46,7 @@ export function DocumentCard({ doc, onReview, disabled }: { doc: DocumentRespons
             className="pressable t-body inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 font-semibold text-white shadow-[var(--shadow-sm)] disabled:opacity-50"
           >
             <DocumentMagnifyingGlassIcon className="size-[18px]" aria-hidden />
-            Проверить договор
+            {t.reviewContract}
           </button>
         )}
         <button
@@ -55,12 +54,12 @@ export function DocumentCard({ doc, onReview, disabled }: { doc: DocumentRespons
           aria-expanded={open}
           className="pressable t-caption font-semibold text-accent-ink"
         >
-          {open ? "Скрыть пункты" : "Показать извлечённые пункты"}
+          {open ? t.hideClauses : t.showClauses}
         </button>
       </div>
       {onReview && doc.clauses.length > 0 && (
         <p className="t-caption mt-2 text-text-3">
-          Каждый пункт получит цвет: нарушение, спорно или нарушений не найдено. Считается как один вопрос.
+          {t.reviewHint}
         </p>
       )}
       <AnimatePresence initial={false}>
@@ -77,7 +76,7 @@ export function DocumentCard({ doc, onReview, disabled }: { doc: DocumentRespons
                 <li key={c.clause_number} className="grid grid-cols-[2.25rem_1fr] gap-x-2 py-2.5">
                   <span className="t-caption pt-0.5 font-semibold text-text-3">{c.clause_number}</span>
                   <div>
-                    <p className="t-caption font-medium text-text-2">{TOPIC_LABELS[c.topic] ?? c.topic}</p>
+                    <p className="t-caption font-medium text-text-2">{t.topics[c.topic] ?? c.topic}</p>
                     <p className="t-caption mt-0.5 text-text">{c.text}</p>
                   </div>
                 </li>

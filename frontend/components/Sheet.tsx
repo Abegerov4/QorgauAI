@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion, useDragControls, type PanInfo } from "motion/react";
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { useT } from "@/lib/i18n";
 import { project, spring, springSheet } from "@/lib/motion";
 
 type Props = { open: boolean; onClose: () => void; label: string; children: ReactNode; side?: boolean };
@@ -19,6 +20,7 @@ const subscribeWide = (cb: () => void) => {
 // With `side`, on laptops it is a full-height panel on the right instead, so
 // the content it explains stays visible next to it.
 export function Sheet({ open, onClose, label, children, side = false }: Props) {
+  const t = useT();
   const wide = useSyncExternalStore(subscribeWide, () => window.matchMedia(WIDE).matches, () => false);
   const right = side && wide;
   const controls = useDragControls();
@@ -94,7 +96,7 @@ export function Sheet({ open, onClose, label, children, side = false }: Props) {
             <button
               onClick={onClose}
               className="pressable absolute top-3 right-3 grid size-8 place-items-center rounded-full bg-surface-2 text-text-2"
-              aria-label="Закрыть"
+              aria-label={t.close}
             >
               <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
                 <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />

@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.agents.lang import Lang
 from app.agents.schemas import FinalAnswer
 from app.ingestion.documents import Clause
 
@@ -58,6 +59,7 @@ class AskRequest(BaseModel):
     question: str = Field("Проверь мой трудовой договор на соответствие Трудовому кодексу РК.", min_length=1, max_length=4000)
     session_id: str | None = Field(None, max_length=200, description="Groups the turns of one conversation in Langfuse.")
     document_id: str | None = Field(None, description="Id from POST /documents; its clauses become evidence D<n>.")
+    lang: Lang = Field("ru", description="Language of the answer; citations stay in Russian.")
 
 
 class PageInfo(BaseModel):

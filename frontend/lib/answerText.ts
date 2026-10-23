@@ -1,16 +1,12 @@
 import type { AskResponse } from "./api";
-
-const STATUS: Record<AskResponse["status"], string> = {
-  answered: "подтверждено нормами",
-  partial: "подтверждено частично",
-  refused: "нет подтверждённого ответа",
-};
+import type { Dict } from "./dict";
 
 /** The answer as plain text with full citations, ready to paste into a letter or a claim. */
-export function answerAsText(answer: AskResponse, question?: string): string {
+export function answerAsText(answer: AskResponse, t: Dict, question?: string): string {
+  const status = { answered: t.statusAnswered, partial: t.statusPartial, refused: t.statusRefused }[answer.status];
   const lines: string[] = [];
-  if (question) lines.push(`Вопрос: ${question}`, "");
-  lines.push(`Ответ QorgauAI (${STATUS[answer.status]}):`);
+  if (question) lines.push(`${t.copyQuestion}: ${question}`, "");
+  lines.push(t.copyAnswerHead(status.toLowerCase()));
   if (answer.claims.length === 0) {
     lines.push(answer.answer);
   } else {
@@ -20,10 +16,10 @@ export function answerAsText(answer: AskResponse, question?: string): string {
     });
   }
   if (answer.missing_info.length) {
-    lines.push("", "Что осталось за рамками ответа:", ...answer.missing_info.map((m) => `– ${m}`));
+    lines.push("", `${t.missing}:`, ...answer.missing_info.map((m) => `– ${m}`));
   }
   if (answer.recommend_lawyer) {
-    lines.push("", "Ситуация спорная или с высокой ценой ошибки — стоит показать её практикующему юристу.");
+    lines.push("", t.lawyer);
   }
   lines.push("", answer.disclaimer);
   return lines.join("\n");

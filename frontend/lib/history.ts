@@ -1,4 +1,5 @@
 import type { ChatSummary, Clause } from "./api";
+import type { Dict } from "./dict";
 
 // Conversations live on the server (GET/PUT /chats). The tab only remembers
 // which one is open, so a reload brings the reader back to it; closing the
@@ -28,25 +29,25 @@ export function openChatId(): string | null {
 type TitleSource = { kind: string; text?: string; doc?: { filename: string } };
 
 /** The first question names the chat; a chat that so far only holds an uploaded contract is named after the file. */
-export function chatTitle(items: TitleSource[]): string {
+export function chatTitle(items: TitleSource[], t: Dict): string {
   const question = items.find((i) => i.kind === "question")?.text;
   const doc = items.find((i) => i.kind === "document")?.doc?.filename;
-  const title = (question ?? (doc ? `Договор: ${doc}` : "Новый чат")).replace(/\s+/g, " ").trim();
+  const title = (question ?? (doc ? t.contractChat(doc) : t.newChat)).replace(/\s+/g, " ").trim();
   return title.length > 80 ? `${title.slice(0, 79)}…` : title;
 }
 
 export type ChatGroup = { label: string; chats: ChatSummary[] };
 
 /** Today / yesterday / this week / earlier, by the reader's local day. */
-export function groupChats(chats: ChatSummary[], now = new Date()): ChatGroup[] {
+export function groupChats(chats: ChatSummary[], t: Dict, now = new Date()): ChatGroup[] {
   const day = 86_400_000;
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const bucket = (c: ChatSummary) => {
-    const t = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(c.updated_at) ? c.updated_at : `${c.updated_at}Z`).getTime();
-    if (t >= today) return "Сегодня";
-    if (t >= today - day) return "Вчера";
-    if (t >= today - 7 * day) return "Последние 7 дней";
-    return "Ранее";
+    const at = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(c.updated_at) ? c.updated_at : `${c.updated_at}Z`).getTime();
+    if (at >= today) return t.groupToday;
+    if (at >= today - day) return t.groupYesterday;
+    if (at >= today - 7 * day) return t.groupWeek;
+    return t.groupEarlier;
   };
   const groups: ChatGroup[] = [];
   for (const c of chats) {

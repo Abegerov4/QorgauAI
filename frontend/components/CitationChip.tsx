@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import type { ArticleResponse } from "@/lib/api";
 import { citedPoint, loadArticle } from "@/lib/articles";
 import { citationLabel, parseCitation, type Citation } from "@/lib/citations";
+import { useT } from "@/lib/i18n";
 import { springSnappy } from "@/lib/motion";
 
 // A citation chip. Click opens the full article in the sheet (as before);
@@ -20,6 +21,7 @@ const GUTTER = 16;
 type Props = { raw: string; onCite: (c: Citation) => void; className: string };
 
 export function CitationChip({ raw, onCite, className }: Props) {
+  const t = useT();
   const c = parseCitation(raw);
   const chip = useRef<HTMLButtonElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -77,7 +79,7 @@ export function CitationChip({ raw, onCite, className }: Props) {
         title={previewable ? undefined : raw}
         className={className}
       >
-        {citationLabel(c)}
+        {citationLabel(c, t)}
       </button>
       {previewable &&
         typeof document !== "undefined" &&
@@ -113,6 +115,7 @@ export function CitationChip({ raw, onCite, className }: Props) {
 }
 
 function Preview({ citation }: { citation: Extract<Citation, { kind: "law" }> }) {
+  const t = useT();
   const [article, setArticle] = useState<ArticleResponse | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -130,22 +133,21 @@ function Preview({ citation }: { citation: Extract<Citation, { kind: "law" }> })
   return (
     <div>
       <p className="t-eyebrow text-gold-ink">
-        {citation.codeShort}
-        {citation.point && ` · ${citation.point}`}
+        {citationLabel(citation, t)}
       </p>
-      <p className="t-body mt-1 leading-snug font-semibold">{article ? article.article : `Статья ${citation.article}`}</p>
+      <p className="t-body mt-1 leading-snug font-semibold">{article ? article.article : t.article(citation.article)}</p>
       {failed ? (
-        <p className="t-caption mt-2 text-text-2">Не удалось загрузить текст. Нажмите, чтобы открыть статью.</p>
+        <p className="t-caption mt-2 text-text-2">{t.articleLoadFailed}</p>
       ) : point ? (
         <p className="t-caption mt-2 line-clamp-6 text-text">{point.text}</p>
       ) : (
-        <div className="mt-2.5 space-y-2" aria-label="Загрузка статьи">
+        <div className="mt-2.5 space-y-2" aria-label={t.loadingArticle}>
           {[100, 90, 70].map((w, i) => (
             <div key={i} className="h-3 animate-pulse rounded-full bg-surface-2" style={{ width: `${w}%` }} />
           ))}
         </div>
       )}
-      <p className="t-caption mt-3 text-text-3">Нажмите на ссылку, чтобы открыть статью целиком</p>
+      <p className="t-caption mt-3 text-text-3">{t.openWholeArticle}</p>
     </div>
   );
 }

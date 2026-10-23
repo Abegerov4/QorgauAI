@@ -7,6 +7,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type AgentEvent, type AskResponse, type ChatSummary, type Clause, type DocumentResponse, type Me, type ReviewRow } from "@/lib/api";
 import type { Citation } from "@/lib/citations";
 import { chatTitle, openChatId, rememberOpenChat, type SavedChat } from "@/lib/history";
+import type { Dict } from "@/lib/dict";
+import { getT, useT } from "@/lib/i18n";
 import { clauseQuestion } from "@/lib/reviewText";
 import { spring, springSnappy } from "@/lib/motion";
 import type { Trace } from "./AgentSteps";
@@ -15,6 +17,7 @@ import { CitationView } from "./CitationView";
 import { ACCEPT, Composer } from "./Composer";
 import { ContractReview, ReviewDetail, type ReviewState } from "./ContractReview";
 import { DocumentCard } from "./DocumentCard";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 import { Logo, Wordmark } from "./Logo";
 import { SearchCompare } from "./SearchCompare";
 import { Sheet } from "./Sheet";
@@ -33,52 +36,32 @@ type Item =
 type Tab = "assistant" | "search";
 
 const MAX_BYTES = 10 * 1024 * 1024;
-const REVIEW_QUESTION = "Проверь мой трудовой договор на соответствие Трудовому кодексу РК.";
-const EXAMPLES: { label: string; question: string; icon: React.ReactNode }[] = [
-  {
-    label: "Ежегодный отпуск",
-    question: "Сколько дней ежегодного отпуска положено работнику?",
-    icon: (
-      <>
-        <rect x="2" y="3" width="12" height="11" rx="2" />
-        <path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" />
-      </>
-    ),
-  },
-  {
-    label: "Испытательный срок",
-    question: "Какой максимальный испытательный срок?",
-    icon: <path d="M4 1.5h8M4 14.5h8M4.5 1.5c0 3.5 3.5 4 3.5 6.5s-3.5 3-3.5 6.5M11.5 1.5c0 3.5-3.5 4-3.5 6.5s3.5 3 3.5 6.5" />,
-  },
-  {
-    label: "Сверхурочные",
-    question: "Как оплачивается сверхурочная работа?",
-    icon: (
-      <>
-        <circle cx="8" cy="8" r="6.25" />
-        <path d="M8 4.5V8l2.5 1.5" />
-      </>
-    ),
-  },
-  {
-    label: "Курултай",
-    question: "Что такое Курултай по Конституции?",
-    icon: <path d="M2 6h12L8 2.5zM3.5 6v6M6.5 6v6M9.5 6v6M12.5 6v6M2 13.5h12" />,
-  },
+// Icons of the example questions, in the order of t.examples.
+const EXAMPLE_ICONS: React.ReactNode[] = [
+  <g key="leave">
+    <rect x="2" y="3" width="12" height="11" rx="2" />
+    <path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" />
+  </g>,
+  <path key="probation" d="M4 1.5h8M4 14.5h8M4.5 1.5c0 3.5 3.5 4 3.5 6.5s-3.5 3-3.5 6.5M11.5 1.5c0 3.5-3.5 4-3.5 6.5s3.5 3 3.5 6.5" />,
+  <g key="overtime">
+    <circle cx="8" cy="8" r="6.25" />
+    <path d="M8 4.5V8l2.5 1.5" />
+  </g>,
+  <path key="kurultai" d="M2 6h12L8 2.5zM3.5 6v6M6.5 6v6M9.5 6v6M12.5 6v6M2 13.5h12" />,
 ];
 
 const uid = () => crypto.randomUUID();
 
 // After a reload: an answer that was still being prepared cannot be picked up
 // again, and restored answers show at once instead of typing themselves out.
-function restoreItems(items: Item[]): Item[] {
+function restoreItems(items: Item[], t: Dict): Item[] {
   return items.map((x) =>
     x.kind === "pending"
-      ? { id: x.id, kind: "error", message: "Ответ не дождался: страница была обновлена. Задайте вопрос ещё раз." }
+      ? { id: x.id, kind: "error", message: t.restoredPending }
       : x.kind === "answer"
         ? { ...x, fresh: false }
         : x.kind === "review" && x.review.status === "running"
-          ? { ...x, review: { ...x.review, status: "error", error: "Проверка прервалась: страница была обновлена." } }
+          ? { ...x, review: { ...x.review, status: "error", error: t.restoredReview } }
           : x,
   );
 }
@@ -92,6 +75,7 @@ function applyEvent(t: Trace, e: AgentEvent): Trace {
 }
 
 export function QorgauApp({ user }: { user: SignedInUser | null }) {
+  const t = useT();
   const [tab, setTab] = useState<Tab>("assistant");
   const [items, setItems] = useState<Item[]>([]);
   const [draft, setDraft] = useState("");
@@ -117,7 +101,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
   const busy = items.some((i) => i.kind === "pending" || (i.kind === "review" && i.review.status === "running"));
 
   const showChat = useCallback((id: string, chat: SavedChat<Item> | null) => {
-    const restoredItems = chat?.items?.length ? restoreItems(chat.items) : [];
+    const restoredItems = chat?.items?.length ? restoreItems(chat.items, getT()) : [];
     sessionId.current = id;
     saved.current = restoredItems;
     setActiveId(id);
@@ -150,8 +134,8 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
   // The A/B search tab is an admin tool: the API refuses it to everyone else.
   const canSearch = me?.role === "admin";
   const openTitle = items.length
-    ? (chats?.find((c) => c.id === activeId)?.title ?? chatTitle(items))
-    : "Новый чат";
+    ? (chats?.find((c) => c.id === activeId)?.title ?? chatTitle(items, t))
+    : t.newChat;
   useEffect(() => {
     if (me && !canSearch) setTab("assistant");
   }, [me, canSearch]);
@@ -187,7 +171,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
   useEffect(() => {
     if (!items.length || items === saved.current) return;
     const id = sessionId.current;
-    const title = chatTitle(items);
+    const title = chatTitle(items, getT());
     const chat = { sessionId: id, items, clauses };
     pendingSave.current = () => {
       saved.current = items;
@@ -260,7 +244,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
   function askAboutClause(row: ReviewRow) {
     setReviewRow(null);
     setTab("assistant");
-    setDraft(clauseQuestion(row));
+    setDraft(clauseQuestion(row, t));
     setTimeout(() => {
       const box = document.getElementById("question") as HTMLTextAreaElement | null;
       box?.focus();
@@ -331,7 +315,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
 
   async function attach(file: File) {
     if (file.size > MAX_BYTES) {
-      setItems((xs) => [...xs, { id: uid(), kind: "error", message: "Файл больше 10 МБ. Загрузите документ поменьше." }]);
+      setItems((xs) => [...xs, { id: uid(), kind: "error", message: t.fileTooBig }]);
       return;
     }
     setTab("assistant");
@@ -348,7 +332,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
   }
 
   async function send(text = draft) {
-    const question = text.trim() || (attachment ? REVIEW_QUESTION : "");
+    const question = text.trim() || (attachment ? t.reviewQuestion : "");
     if (!question || busy || attachment?.uploading) return;
     const pendingId = uid();
     const startedAt = Date.now();
@@ -356,7 +340,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
     setDraft("");
     if (!items.length || !chats?.some((c) => c.id === sessionId.current)) {
       const id = sessionId.current;
-      const title = chatTitle([...items, { kind: "question", text: question }]);
+      const title = chatTitle([...items, { kind: "question", text: question }], t);
       setActiveId(id);
       setChats((cs) => [{ id, title, updated_at: new Date().toISOString() }, ...(cs ?? []).filter((c) => c.id !== id)]);
     }
@@ -375,7 +359,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
       setItems((xs) => xs.map((x) => (x.id === pendingId ? { id: pendingId, kind: "answer", answer, seconds, fresh: true } : x)));
       setMe((m) => (m ? { ...m, questions_today: m.questions_today + 1 } : m));
     } catch (e) {
-      const message = controller.signal.aborted ? "Запрос отменён." : (e as Error).message;
+      const message = controller.signal.aborted ? t.askCancelled : (e as Error).message;
       setItems((xs) => xs.map((x) => (x.id === pendingId ? { id: pendingId, kind: "error", message } : x)));
     } finally {
       abort.current = null;
@@ -402,7 +386,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
       patch((r) => ({ ...r, status: "done", rows: review.clauses, review }));
       setMe((m) => (m ? { ...m, questions_today: m.questions_today + 1 } : m));
     } catch (e) {
-      const error = controller.signal.aborted ? "Проверка отменена." : (e as Error).message;
+      const error = controller.signal.aborted ? t.reviewCancelled : (e as Error).message;
       patch((r) => ({ ...r, status: "error", error }));
     } finally {
       abort.current = null;
@@ -423,7 +407,7 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
         attachment={attachment}
         busy={busy}
         onStop={() => abort.current?.abort()}
-        placeholder={attachment ? "Что проверить в договоре?" : "Спросите о трудовых правах"}
+        placeholder={attachment ? t.placeholderDoc : t.placeholder}
       />
     </motion.div>
   );
@@ -577,8 +561,8 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
                     exit={{ opacity: 0, y: 8, scale: 0.9 }}
                     transition={springSnappy}
                     className="material-thick pressable pointer-events-auto grid size-10 place-items-center rounded-full text-text-2 hover:text-text"
-                    aria-label="К последнему ответу"
-                    title="К последнему ответу"
+                    aria-label={t.toLastAnswer}
+                    title={t.toLastAnswer}
                   >
                     <svg width="14" height="16" viewBox="0 0 14 16" fill="none" aria-hidden>
                       <path d="M7 1.5V14M1.5 8.5L7 14l5.5-5.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -616,18 +600,18 @@ export function QorgauApp({ user }: { user: SignedInUser | null }) {
               transition={springSnappy}
             >
               <div className="text-center">
-                <p className="t-title text-accent-ink">Отпустите, чтобы загрузить договор</p>
-                <p className="t-caption mt-1 text-text-2">PDF, Word, JPG или PNG до 10 МБ</p>
+                <p className="t-title text-accent-ink">{t.dropTitle}</p>
+                <p className="t-caption mt-1 text-text-2">{t.dropHint}</p>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        <Sheet open={!!reviewRow} onClose={() => setReviewRow(null)} label="Проверка пункта договора" side>
+        <Sheet open={!!reviewRow} onClose={() => setReviewRow(null)} label={t.sheetClause} side>
           {reviewRow && <ReviewDetail key={reviewRow.clause_number} row={reviewRow} onAsk={askAboutClause} />}
         </Sheet>
 
-        <Sheet open={!!citation} onClose={closeCitation} label="Текст нормы">
+        <Sheet open={!!citation} onClose={closeCitation} label={t.sheetNorm}>
           {citation && <CitationView citation={citation} clauses={clauses} />}
         </Sheet>
       </div>
@@ -715,41 +699,29 @@ function ThreadItem({ item, question, reviewed, busy, onReview, onOpenReview, on
   }
 }
 
-const TOPICS = [
-  "с ежегодным отпуском?",
-  "с испытательным сроком?",
-  "со сверхурочной работой?",
-  "с трудовым договором?",
-  "с вопросом по Конституции?",
-];
-
-const STEPS = [
-  { title: "Спросите своими словами", text: "Или загрузите трудовой договор — PDF, Word или фото" },
-  { title: "Агент найдёт нормы", text: "В Трудовом кодексе и Конституции РК" },
-  { title: "Второй агент проверит", text: "Каждое утверждение — по тексту статьи" },
-];
-
 // The brand is already in the header, so the start screen does not repeat it:
 // it says what the assistant covers and asks what the user needs.
 function Intro() {
+  const t = useT();
   return (
     <div className="flex flex-col items-center text-center">
       <h1 className="t-display max-w-2xl">
-        Чем могу помочь
+        {t.heroLead}
         <br />
-        <WordRotate words={TOPICS} still="с трудовыми правами?" className="text-accent-ink" />
+        <WordRotate key={t.heroStill} words={t.heroTopics} still={t.heroStill} className="text-accent-ink" />
       </h1>
       <p className="t-body mt-3 max-w-lg text-balance text-text-2">
-        Отвечаю по Конституции и Трудовому кодексу РК — со ссылкой на каждую статью.
+        {t.heroSub}
       </p>
     </div>
   );
 }
 
 function HowItWorks() {
+  const t = useT();
   return (
-    <ol className="mt-8 grid gap-2 text-left sm:grid-cols-3" aria-label="Как это работает">
-      {STEPS.map((s, i) => (
+    <ol className="mt-8 grid gap-2 text-left sm:grid-cols-3" aria-label={t.howItWorks}>
+      {t.steps.map((s, i) => (
         <li key={s.title} className="flex gap-3 rounded-2xl border border-hairline bg-surface/60 p-3.5 backdrop-blur sm:flex-col sm:gap-2">
           <span className="t-caption grid size-6 shrink-0 place-items-center rounded-full bg-accent-soft font-semibold text-accent-ink tabular-nums">
             {i + 1}
@@ -767,14 +739,16 @@ function HowItWorks() {
 // What the intro becomes once the conversation starts: a quiet line at the
 // top of the thread (no second logo), scrolling away with it.
 function IntroCompact() {
+  const t = useT();
   return (
     <p className="t-caption mb-6 border-b border-hairline pb-4 text-text-3">
-      Отвечаю по Конституции и Трудовому кодексу РК. Каждое утверждение проверяет второй агент.
+      {t.introCompact}
     </p>
   );
 }
 
 function FollowUps({ questions, onAsk, disabled }: { questions: string[]; onAsk: (q: string) => void; disabled: boolean }) {
+  const t = useT();
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -782,7 +756,7 @@ function FollowUps({ questions, onAsk, disabled }: { questions: string[]; onAsk:
       transition={{ ...spring, delay: 0.4 }}
       className="mt-3 flex flex-col items-start gap-1.5"
     >
-      <p className="t-caption px-1 text-text-3">Можно спросить дальше</p>
+      <p className="t-caption px-1 text-text-3">{t.followUps}</p>
       {questions.map((q) => (
         <button
           key={q}
@@ -809,12 +783,13 @@ function Suggestions({
   compact?: boolean;
   className: string;
 }) {
+  const t = useT();
   // Above the bottom composer the chips stay on one line and scroll sideways.
   const size = compact ? "px-2.5 py-1.5" : "px-3 py-2";
   const row = compact ? "no-scrollbar flex-nowrap overflow-x-auto" : "flex-wrap";
   return (
     <div className={`flex gap-1.5 ${row} ${className}`}>
-      {EXAMPLES.map((e) => (
+      {t.examples.map((e, i) => (
         <button
           key={e.label}
           onClick={() => onPick(e.question)}
@@ -822,7 +797,7 @@ function Suggestions({
           title={e.question}
           className={`pressable t-caption inline-flex shrink-0 items-center gap-1.5 rounded-full border border-hairline bg-surface font-medium text-text-2 hover:bg-surface-2 hover:text-text disabled:opacity-50 ${size}`}
         >
-          <PillIcon className="text-accent-ink">{e.icon}</PillIcon>
+          <PillIcon className="text-accent-ink">{EXAMPLE_ICONS[i]}</PillIcon>
           {e.label}
         </button>
       ))}
@@ -831,9 +806,10 @@ function Suggestions({
 }
 
 function Disclaimer() {
+  const t = useT();
   return (
     <p className="t-caption mt-3 px-3 text-center text-text-3">
-      ИИН, телефоны и счета скрываются до отправки в модель. Ответ — информация, а не юридическая консультация.
+      {t.disclaimer}
     </p>
   );
 }
@@ -876,6 +852,7 @@ type HeaderProps = {
 // account live in the sidebar; on phones (or with the sidebar hidden) the
 // header brings back the menu button, the emblem and "new chat".
 function Header({ tab, onTab, showSearch, title, online, onNewChat, onMenu, sidebarHidden, onShowSidebar }: HeaderProps) {
+  const t = useT();
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
@@ -888,13 +865,13 @@ function Header({ tab, onTab, showSearch, title, online, onNewChat, onMenu, side
   const allTabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     {
       id: "assistant",
-      label: "Помощник",
+      label: t.tabAssistant,
       icon: <path d="M2.5 3.5a1 1 0 011-1h9a1 1 0 011 1v6.5a1 1 0 01-1 1H7l-3 2.5v-2.5h-.5a1 1 0 01-1-1z" />,
     },
-    { id: "search", label: "Поиск A/B", icon: <path d="M7 12.5a5.5 5.5 0 100-11 5.5 5.5 0 000 11zM11 11l3.5 3.5" /> },
+    { id: "search", label: t.tabSearch, icon: <path d="M7 12.5a5.5 5.5 0 100-11 5.5 5.5 0 000 11zM11 11l3.5 3.5" /> },
   ];
   const tabs = allTabs.filter((t) => showSearch || t.id !== "search");
-  const status = online === null ? "Подключение…" : online ? "База подключена" : "Бэкенд недоступен";
+  const status = online === null ? t.statusConnecting : online ? t.statusOnline : t.statusOffline;
   return (
     <header className="pointer-events-none sticky top-0 z-30 px-2 pt-2 sm:px-4">
       <motion.div
@@ -914,8 +891,8 @@ function Header({ tab, onTab, showSearch, title, online, onNewChat, onMenu, side
           <button
             onClick={sidebarHidden ? () => (window.matchMedia("(min-width: 64rem)").matches ? onShowSidebar() : onMenu()) : onMenu}
             className={`pressable grid size-9 place-items-center rounded-full text-text-2 hover:bg-surface-2 hover:text-text ${compact}`}
-            aria-label="История чатов"
-            title="История чатов"
+            aria-label={t.chatHistory}
+            title={t.chatHistory}
           >
             <Bars3Icon className="size-5" />
           </button>
@@ -925,7 +902,7 @@ function Header({ tab, onTab, showSearch, title, online, onNewChat, onMenu, side
           </span>
         </div>
         {tabs.length > 1 ? (
-          <nav className="flex gap-0.5 rounded-full border border-hairline bg-surface-2/70 p-1" aria-label="Разделы">
+          <nav className="flex gap-0.5 rounded-full border border-hairline bg-surface-2/70 p-1" aria-label={t.sections}>
             {tabs.map((t) => {
               const active = tab === t.id;
               return (
@@ -984,13 +961,14 @@ function Header({ tab, onTab, showSearch, title, online, onNewChat, onMenu, side
                 exit={{ opacity: 0, scale: 0.9 }}
                 transition={springSnappy}
                 className={`pressable t-caption inline-flex items-center gap-1.5 rounded-full bg-surface-2 p-2 font-medium text-text hover:bg-accent-soft hover:text-accent-ink ${compact}`}
-                aria-label="Новый чат"
-                title="Начать новый чат"
+                aria-label={t.newChat}
+                title={t.newChatTitle}
               >
                 <PlusIcon className="size-4" />
               </motion.button>
             )}
           </AnimatePresence>
+          <LanguageSwitcher />
           <span className="grid size-5 shrink-0 place-items-center" title={status} role="status" aria-label={status}>
             <span className="relative flex size-2">
               {online && <span className="absolute inset-0 animate-ping rounded-full bg-green opacity-60 motion-reduce:animate-none" />}

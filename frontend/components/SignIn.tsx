@@ -1,14 +1,18 @@
 import Image from "next/image";
 import Link from "next/link";
 import { signIn } from "@/auth";
+import { type Lang, getDict } from "@/lib/dict";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 
 // Server component: the button posts a server action that starts Google OAuth.
-export function SignIn() {
+export function SignIn({ lang }: { lang: Lang }) {
+  const t = getDict(lang);
   return (
     <main className="relative grid min-h-dvh place-items-center overflow-hidden px-4">
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden>
         <div className="aurora" />
       </div>
+      <LanguageSwitcher className="fixed top-4 right-4" />
       <div className="material-thick w-full max-w-sm rounded-[1.75rem] p-7 text-center">
         <span className="mx-auto grid size-16 place-items-center rounded-full dark:bg-white/95">
           <Image src="/logo-mark.png" alt="" width={64} height={64} priority className="dark:scale-[0.84]" />
@@ -17,7 +21,7 @@ export function SignIn() {
           Qorgau<span className="text-gold-ink">AI</span>
         </h1>
         <p className="t-body mt-2 text-balance text-text-2">
-          Ответы по Конституции и Трудовому кодексу РК — со ссылкой на каждую статью.
+          {t.signInLead}
         </p>
         <form
           className="mt-6"
@@ -28,15 +32,14 @@ export function SignIn() {
         >
           <button type="submit" className="pressable t-body flex w-full items-center justify-center gap-2.5 rounded-full bg-accent px-5 py-3 font-semibold text-white">
             <GoogleMark />
-            Войти через Google
+            {t.signInGoogle}
           </button>
         </form>
         <p className="t-caption mt-5 text-text-3">
-          Вход нужен, чтобы сохранять историю и ограничить расходы: до 20 вопросов в день. Ответ — информация, а не
-          юридическая консультация.
+          {t.signInNote}
         </p>
         <Link href="/privacy" className="t-caption mt-3 inline-block font-medium text-accent-ink">
-          Политика конфиденциальности
+          {t.privacy}
         </Link>
       </div>
     </main>

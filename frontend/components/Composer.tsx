@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import { useLayoutEffect, useRef, type KeyboardEvent } from "react";
+import { useT } from "@/lib/i18n";
 import { springSnappy } from "@/lib/motion";
 
 type Props = {
@@ -20,6 +21,7 @@ type Props = {
 export const ACCEPT = "application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png";
 
 export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attachment, busy, placeholder, onStop }: Props) {
+  const t = useT();
   const area = useRef<HTMLTextAreaElement>(null);
   const file = useRef<HTMLInputElement>(null);
   const canSend = !busy && !attachment?.uploading && (value.trim().length > 0 || !!attachment);
@@ -53,13 +55,13 @@ export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attach
             <div className="flex items-center gap-2 px-2 pt-1 pb-1.5">
               <span className="t-caption inline-flex max-w-full items-center gap-2 rounded-full bg-surface-2 py-1 pr-1 pl-3">
                 <span className={`truncate ${attachment.uploading ? "shimmer" : ""}`}>
-                  {attachment.uploading ? `Читаю ${attachment.name}…` : attachment.name}
+                  {attachment.uploading ? t.readingFile(attachment.name) : attachment.name}
                 </span>
                 {!attachment.uploading && (
                   <button
                     onClick={onDetach}
                     className="pressable grid size-5 place-items-center rounded-full bg-text-3/25 text-text-2"
-                    aria-label="Убрать документ"
+                    aria-label={t.removeDocument}
                   >
                     <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden>
                       <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
@@ -77,8 +79,8 @@ export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attach
           onClick={() => file.current?.click()}
           disabled={!!attachment?.uploading}
           className="pressable grid size-10 shrink-0 place-items-center rounded-full text-text-2 hover:bg-surface-2 hover:text-text disabled:opacity-40"
-          aria-label="Загрузить договор (PDF, Word, JPG, PNG)"
-          title="Загрузить договор (PDF, Word, JPG, PNG)"
+          aria-label={t.uploadContract}
+          title={t.uploadContract}
         >
           <svg width="18" height="20" viewBox="0 0 18 20" fill="none" aria-hidden>
             <path
@@ -101,7 +103,7 @@ export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attach
           }}
         />
         <label htmlFor="question" className="sr-only">
-          Вопрос
+          {t.question}
         </label>
         <textarea
           id="question"
@@ -118,8 +120,8 @@ export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attach
           <button
             onClick={onStop}
             className="pressable grid size-10 shrink-0 place-items-center rounded-full bg-text text-bg"
-            aria-label="Остановить"
-            title="Остановить"
+            aria-label={t.stop}
+            title={t.stop}
           >
             <span className="size-3 rounded-[3px] bg-current" aria-hidden />
           </button>
@@ -128,7 +130,7 @@ export function Composer({ value, onChange, onSubmit, onAttach, onDetach, attach
             onClick={onSubmit}
             disabled={!canSend}
             className="pressable grid size-10 shrink-0 place-items-center rounded-full bg-accent text-white disabled:bg-surface-2 disabled:text-text-3"
-            aria-label="Отправить"
+            aria-label={t.send}
           >
             <svg width="14" height="16" viewBox="0 0 14 16" fill="none" aria-hidden>
               <path d="M7 14.5V2M1.5 7.5L7 2l5.5 5.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
